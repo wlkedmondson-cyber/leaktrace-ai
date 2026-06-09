@@ -88,6 +88,13 @@ def init_db():
         cal_front_right_lat REAL,
         cal_front_right_lon REAL,
         cal_front_right_accuracy REAL,
+        cal_back_right_lat REAL,
+        cal_back_right_lon REAL,
+        cal_back_right_accuracy REAL,
+
+        cal_back_left_lat REAL,
+        cal_back_left_lon REAL,
+        cal_back_left_accuracy REAL,
         cal_ridge_lat REAL,
         cal_ridge_lon REAL,
         cal_ridge_accuracy REAL,
@@ -168,6 +175,13 @@ def init_db():
         "cal_front_right_lat": "REAL",
         "cal_front_right_lon": "REAL",
         "cal_front_right_accuracy": "REAL",
+        "cal_back_right_lat": "REAL",
+        "cal_back_right_lon": "REAL",
+        "cal_back_right_accuracy": "REAL",
+
+        "cal_back_left_lat": "REAL",
+        "cal_back_left_lon": "REAL",
+        "cal_back_left_accuracy": "REAL",
         "cal_ridge_lat": "REAL",
         "cal_ridge_lon": "REAL",
         "cal_ridge_accuracy": "REAL",
@@ -545,9 +559,35 @@ def save_calibration_point(investigation_id):
     point_type = data.get("point_type")
 
     allowed = {
-        "front_left": ("cal_front_left_lat", "cal_front_left_lon", "cal_front_left_accuracy"),
-        "front_right": ("cal_front_right_lat", "cal_front_right_lon", "cal_front_right_accuracy"),
-        "ridge": ("cal_ridge_lat", "cal_ridge_lon", "cal_ridge_accuracy"),
+        "front_left": (
+            "cal_front_left_lat",
+            "cal_front_left_lon",
+            "cal_front_left_accuracy"
+        ),
+
+        "front_right": (
+            "cal_front_right_lat",
+            "cal_front_right_lon",
+            "cal_front_right_accuracy"
+        ),
+
+        "back_right": (
+            "cal_back_right_lat",
+            "cal_back_right_lon",
+            "cal_back_right_accuracy"
+        ),
+
+        "back_left": (
+            "cal_back_left_lat",
+            "cal_back_left_lon",
+            "cal_back_left_accuracy"
+        ),
+
+        "ridge": (
+            "cal_ridge_lat",
+            "cal_ridge_lon",
+            "cal_ridge_accuracy"
+        ),
     }
 
     if point_type not in allowed:

@@ -1,71 +1,79 @@
 {% extends "base.html" %}
 {% block content %}
+
 <section class="results-shell">
     <div class="case-header">
         <div>
             <div class="eyebrow">Case {{ investigation.case_number }}</div>
             <h1>Stain-to-Roof Locator</h1>
-            <p>GPS + compass + structure calibration roof search guidance</p>
+            <p>GPS + compass + full structure footprint calibration roof search guidance</p>
         </div>
     </div>
 
-    <div class="panel">
-        <h2>Step 1 — Mark Interior Leak Point</h2>
-        <p>Stand directly below the visible stain or drip. The app captures multiple GPS samples, rejects weak readings, and averages the best points.</p>
+```
+<div class="panel">
+    <h2>Step 1 — Mark Interior Leak Point</h2>
+    <p>Stand directly below the visible stain or drip. The app captures multiple GPS samples, rejects weak readings, and averages the best points.</p>
 
-        <button class="primary-btn" type="button" onclick="captureInteriorPoint()">Mark Interior Point</button>
+    <button class="primary-btn" type="button" onclick="captureInteriorPoint()">Mark Interior Point</button>
 
-        <div id="interior-status" class="locator-status">
-            {% if investigation.interior_lat and investigation.interior_lon %}
-                <p><strong>Interior point already saved.</strong></p>
-                <p>Latitude: {{ "%.6f"|format(investigation.interior_lat) }}</p>
-                <p>Longitude: {{ "%.6f"|format(investigation.interior_lon) }}</p>
-                {% if investigation.interior_accuracy %}
-                    <p>Accuracy: ±{{ "%.1f"|format(investigation.interior_accuracy) }} ft</p>
-                {% endif %}
+    <div id="interior-status" class="locator-status">
+        {% if investigation.interior_lat and investigation.interior_lon %}
+            <p><strong>Interior point already saved.</strong></p>
+            <p>Latitude: {{ "%.6f"|format(investigation.interior_lat) }}</p>
+            <p>Longitude: {{ "%.6f"|format(investigation.interior_lon) }}</p>
+            {% if investigation.interior_accuracy %}
+                <p>Accuracy: ±{{ "%.1f"|format(investigation.interior_accuracy) }} ft</p>
             {% endif %}
-        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel">
+    <h2>Step 2 — Walk the Building Footprint</h2>
+    <p>Mark all four building corners outside. This creates a structure footprint instead of relying on raw GPS alone.</p>
+
+    <div class="grid-2">
+        <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_left')">Mark Front-Left Corner</button>
+        <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_right')">Mark Front-Right Corner</button>
+        <button class="primary-btn" type="button" onclick="captureCalibrationPoint('back_right')">Mark Back-Right Corner</button>
+        <button class="primary-btn" type="button" onclick="captureCalibrationPoint('back_left')">Mark Back-Left Corner</button>
+        <button class="primary-btn" type="button" onclick="captureCalibrationPoint('ridge')">Optional: Mark Ridge / Roof Feature</button>
     </div>
 
-    <div class="panel">
-        <h2>Step 2 — Calibrate the Structure</h2>
-        <p>Mark two known building points outside. This lets the locator tighten the zone instead of trusting raw GPS alone.</p>
-
-        <div class="grid-2">
-            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_left')">Mark Front-Left Corner</button>
-            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_right')">Mark Front-Right Corner</button>
-            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('ridge')">Optional: Mark Ridge / Roof Feature</button>
-        </div>
-
-        <div id="calibration-status" class="locator-status">
-            {% if investigation.cal_front_left_lat and investigation.cal_front_right_lat %}
-                <p><strong>Structure calibration has two reference points saved.</strong></p>
-            {% else %}
-                <p class="muted">Mark at least front-left and front-right corners for tighter guidance.</p>
-            {% endif %}
-        </div>
+    <div id="calibration-status" class="locator-status">
+        {% if investigation.cal_front_left_lat and investigation.cal_front_right_lat and investigation.cal_back_right_lat and investigation.cal_back_left_lat %}
+            <p><strong>Full building footprint calibration saved.</strong></p>
+        {% elif investigation.cal_front_left_lat and investigation.cal_front_right_lat %}
+            <p><strong>Partial calibration saved. Add back corners for full footprint mode.</strong></p>
+        {% else %}
+            <p class="muted">Mark all four corners for the tightest structure-based guidance.</p>
+        {% endif %}
     </div>
+</div>
 
-    <div class="panel">
-        <h2>Step 3 — Roof Locator Mode</h2>
-        <p>Move onto the roof or near the roof edge, then start the locator.</p>
+<div class="panel">
+    <h2>Step 3 — Roof Locator Mode</h2>
+    <p>Move onto the roof or near the roof edge, then start the locator.</p>
 
-        <button class="primary-btn" type="button" onclick="startRoofLocator()">Start Roof Locator</button>
-        <button class="primary-btn" type="button" onclick="saveCurrentRoofPoint()">Save Current Roof Position</button>
+    <button class="primary-btn" type="button" onclick="startRoofLocator()">Start Roof Locator</button>
+    <button class="primary-btn" type="button" onclick="saveCurrentRoofPoint()">Save Current Roof Position</button>
 
-        <div id="roof-status" class="locator-status"></div>
+    <div id="roof-status" class="locator-status"></div>
 
-        <div class="panel" style="margin-top:18px;">
-            <h2 id="zone-display">Projected Zone: --</h2>
-            <h3 id="distance-display">Distance to marker: --</h3>
-            <h3 id="bearing-display">Target bearing: --</h3>
-            <h3 id="heading-display">Phone heading: --</h3>
-            <h3 id="accuracy-display">GPS accuracy: --</h3>
-            <h3 id="confidence-display">Locator confidence: --</h3>
-            <h3 id="calibration-display">Calibration: --</h3>
-            <p class="muted">This is a roof search zone, not a guaranteed entry point. Water can travel before appearing inside.</p>
-        </div>
+    <div class="panel" style="margin-top:18px;">
+        <h2 id="zone-display">Projected Zone: --</h2>
+        <h3 id="distance-display">Distance to marker: --</h3>
+        <h3 id="bearing-display">Target bearing: --</h3>
+        <h3 id="heading-display">Phone heading: --</h3>
+        <h3 id="accuracy-display">GPS accuracy: --</h3>
+        <h3 id="confidence-display">Locator confidence: --</h3>
+        <h3 id="calibration-display">Calibration: --</h3>
+        <p class="muted">This is a roof search zone, not a guaranteed entry point. Water can travel before appearing inside.</p>
     </div>
+</div>
+```
+
 </section>
 
 <script id="locator-data" type="application/json">
@@ -74,10 +82,19 @@
     "interiorLat": {{ investigation.interior_lat|tojson }},
     "interiorLon": {{ investigation.interior_lon|tojson }},
     "interiorAccuracy": {{ investigation.interior_accuracy|tojson }},
+
     "frontLeftLat": {{ investigation.cal_front_left_lat|tojson }},
     "frontLeftLon": {{ investigation.cal_front_left_lon|tojson }},
+
     "frontRightLat": {{ investigation.cal_front_right_lat|tojson }},
     "frontRightLon": {{ investigation.cal_front_right_lon|tojson }},
+
+    "backRightLat": {{ investigation.cal_back_right_lat|tojson }},
+    "backRightLon": {{ investigation.cal_back_right_lon|tojson }},
+
+    "backLeftLat": {{ investigation.cal_back_left_lat|tojson }},
+    "backLeftLon": {{ investigation.cal_back_left_lon|tojson }},
+
     "ridgeLat": {{ investigation.cal_ridge_lat|tojson }},
     "ridgeLon": {{ investigation.cal_ridge_lon|tojson }}
 }
@@ -275,6 +292,8 @@ async function captureCalibrationPoint(pointType) {
     const labels = {
         "front_left": "Front-left corner",
         "front_right": "Front-right corner",
+        "back_right": "Back-right corner",
+        "back_left": "Back-left corner",
         "ridge": "Ridge / roof feature"
     };
 
@@ -301,7 +320,7 @@ async function captureCalibrationPoint(pointType) {
             "<p>Average accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
             "<p>Best sample accuracy: ±" + payload.best_accuracy.toFixed(1) + " ft</p>" +
             "<p>Samples used: " + payload.samples_used + "</p>" +
-            "<p class='muted'>Reload this page after saving both front corners to use calibrated guidance.</p>"
+            "<p class='muted'>Reload this page after saving all four corners to use full footprint guidance.</p>"
         );
     } catch (err) {
         alert("GPS error: " + err.message);
@@ -365,8 +384,8 @@ async function startRoofLocator() {
             setText(
                 "calibration-display",
                 calibrated
-                    ? "Calibration: enabled — tightened search zone"
-                    : "Calibration: not complete — GPS-only fallback"
+                    ? "Calibration: full building footprint enabled"
+                    : "Calibration: incomplete — GPS-only / partial fallback"
             );
 
             if (accuracyFeet > 35) {
@@ -428,11 +447,11 @@ async function saveCurrentRoofPoint() {
 
 function getProjectedRadius(accuracyFeet, calibrated) {
     if (calibrated) {
-        if (accuracyFeet <= 10) return 8;
-        if (accuracyFeet <= 15) return 10;
-        if (accuracyFeet <= 20) return 14;
-        if (accuracyFeet <= 25) return 18;
-        return 24;
+        if (accuracyFeet <= 10) return 7;
+        if (accuracyFeet <= 15) return 9;
+        if (accuracyFeet <= 20) return 12;
+        if (accuracyFeet <= 25) return 16;
+        return 22;
     }
 
     if (accuracyFeet <= 10) return 12;
@@ -462,8 +481,15 @@ function hasCalibration() {
     return (
         locatorData.frontLeftLat !== null &&
         locatorData.frontLeftLon !== null &&
+
         locatorData.frontRightLat !== null &&
-        locatorData.frontRightLon !== null
+        locatorData.frontRightLon !== null &&
+
+        locatorData.backRightLat !== null &&
+        locatorData.backRightLon !== null &&
+
+        locatorData.backLeftLat !== null &&
+        locatorData.backLeftLon !== null
     );
 }
 
@@ -502,4 +528,5 @@ function bearingToCardinal(bearing) {
     return directions[Math.round(bearing / 45) % 8];
 }
 </script>
+
 {% endblock %}
