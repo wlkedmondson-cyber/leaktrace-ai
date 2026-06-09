@@ -4,3 +4,4 @@ Werkzeug==3.0.3
 openai==1.93.0
 requests
 gunicorn
+reportlab==4.2.2

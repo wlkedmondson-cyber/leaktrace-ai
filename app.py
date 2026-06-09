@@ -1,8 +1,14 @@
 import os
+import json
 import sqlite3
 from datetime import datetime
+
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import letter
 
 from services.diagnosis import run_leak_investigation
 
@@ -100,6 +106,8 @@ def init_db():
         ai_confirmation_steps TEXT,
         ai_repair_recommendation TEXT,
         ai_cost_range TEXT,
+        ai_heatmap_json TEXT,
+        ai_callouts_json TEXT,
 
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -129,7 +137,6 @@ def init_db():
     );
     """)
 
-    # Safe migrations for existing local leaktrace.db files
     migrations = {
         "property_address": "TEXT",
         "property_lat": "REAL",
@@ -164,6 +171,9 @@ def init_db():
         "cal_ridge_lat": "REAL",
         "cal_ridge_lon": "REAL",
         "cal_ridge_accuracy": "REAL",
+
+        "ai_heatmap_json": "TEXT",
+        "ai_callouts_json": "TEXT",
     }
 
     for column, column_type in migrations.items():
@@ -265,7 +275,6 @@ def investigation_wizard(investigation_id):
             investigation_id
         ))
 
-        # Weather lookup
         weather_data = None
 
         if get_weather_summary and fields["property_address"]:
@@ -346,7 +355,9 @@ def investigation_wizard(investigation_id):
                 ai_summary=?,
                 ai_confirmation_steps=?,
                 ai_repair_recommendation=?,
-                ai_cost_range=?
+                ai_cost_range=?,
+                ai_heatmap_json=?,
+                ai_callouts_json=?
             WHERE id=?
         """, (
             diagnosis.get("probable_source"),
@@ -358,6 +369,8 @@ def investigation_wizard(investigation_id):
             diagnosis.get("confirmation_steps"),
             diagnosis.get("repair_recommendation"),
             diagnosis.get("estimated_cost_range"),
+            json.dumps(diagnosis.get("heatmap_zones", [])),
+            json.dumps(diagnosis.get("callout_markers", [])),
             investigation_id
         ))
 
@@ -400,12 +413,29 @@ def results(investigation_id):
         (investigation_id,)
     ).fetchall()
 
+    heatmap_zones = []
+    callout_markers = []
+
+    if investigation["ai_heatmap_json"]:
+        try:
+            heatmap_zones = json.loads(investigation["ai_heatmap_json"])
+        except Exception:
+            heatmap_zones = []
+
+    if investigation["ai_callouts_json"]:
+        try:
+            callout_markers = json.loads(investigation["ai_callouts_json"])
+        except Exception:
+            callout_markers = []
+
     conn.close()
 
     return render_template(
         "results.html",
         investigation=investigation,
-        photos=photos
+        photos=photos,
+        heatmap_zones=heatmap_zones,
+        callout_markers=callout_markers
     )
 
 
@@ -543,6 +573,101 @@ def save_calibration_point(investigation_id):
     conn.close()
 
     return jsonify({"success": True})
+
+
+@app.route("/report/<int:investigation_id>/pdf")
+def pdf_report(investigation_id):
+    init_db()
+
+    conn = get_db()
+
+    investigation = conn.execute(
+        "SELECT * FROM investigations WHERE id=?",
+        (investigation_id,)
+    ).fetchone()
+
+    photos = conn.execute(
+        "SELECT * FROM investigation_photos WHERE investigation_id=?",
+        (investigation_id,)
+    ).fetchall()
+
+    conn.close()
+
+    if investigation is None:
+        flash("Case not found.", "warning")
+        return redirect(url_for("index"))
+
+    report_dir = os.path.join(BASE_DIR, "generated_reports")
+    os.makedirs(report_dir, exist_ok=True)
+
+    pdf_path = os.path.join(
+        report_dir,
+        f"{investigation['case_number']}.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=letter,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("LeakTrace AI Investigation Report", styles["Title"]))
+    story.append(Spacer(1, 18))
+
+    story.append(Paragraph(f"<b>Case Number:</b> {investigation['case_number']}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Property Address:</b> {investigation['property_address'] or 'Not Provided'}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Roof Type:</b> {investigation['roof_type'] or 'Unknown'}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>AI Confidence:</b> {investigation['ai_confidence'] or 'N/A'}%", styles["BodyText"]))
+
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("<b>Most Probable Leak Source</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["ai_source"] or "Unknown", styles["BodyText"]))
+
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>AI Diagnosis</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["ai_cause"] or "", styles["BodyText"]))
+
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>Repair Recommendation</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["ai_repair_recommendation"] or "", styles["BodyText"]))
+
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>Confirmation Steps</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["ai_confirmation_steps"] or "", styles["BodyText"]))
+
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("<b>Estimated Repair Range</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["ai_cost_range"] or "Unknown", styles["BodyText"]))
+
+    story.append(Spacer(1, 18))
+
+    story.append(Paragraph("<b>Weather Correlation</b>", styles["Heading2"]))
+    story.append(Paragraph(investigation["weather_summary"] or "No weather data", styles["BodyText"]))
+
+    story.append(Spacer(1, 18))
+
+    story.append(Paragraph(f"<b>Uploaded Evidence Count:</b> {len(photos)} photos", styles["BodyText"]))
+
+    story.append(Spacer(1, 24))
+    story.append(Paragraph("Generated by LeakTrace AI", styles["Italic"]))
+
+    doc.build(story)
+
+    return send_file(
+        pdf_path,
+        as_attachment=True
+    )
 
 
 @app.route("/admin/cases")

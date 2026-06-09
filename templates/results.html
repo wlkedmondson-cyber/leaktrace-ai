@@ -1,208 +1,376 @@
 {% extends "base.html" %}
 {% block content %}
+
 <section class="results-shell">
-    <div class="case-header">
-        <div>
-            <div class="eyebrow">Case {{ investigation.case_number }}</div>
-            <h1>Investigation Findings</h1>
-            <p style="margin-top:14px;">
-                <a class="primary-btn" href="{{ url_for('locator', investigation_id=investigation.id) }}">
-                    Open GPS Roof Locator
-                </a>
-            </p>
-            <p>{{ investigation.mode|title }} Mode</p>
+
+<div class="case-header">
+    <div>
+        <div class="eyebrow">
+            Case {{ investigation.case_number }}
         </div>
 
-        <div class="confidence-ring">
-            <strong>{{ investigation.ai_confidence }}%</strong>
-            <span>Confidence</span>
+        <h1>Investigation Findings</h1>
+
+        <p style="margin-top:14px;">
+            <a class="primary-btn"
+               href="{{ url_for('locator', investigation_id=investigation.id) }}">
+                Open GPS Roof Locator
+            </a>
+        </p>
+
+        <p style="margin-top:12px;">
+            <a class="primary-btn"
+               href="{{ url_for('pdf_report', investigation_id=investigation.id) }}">
+                Download Professional PDF Report
+            </a>
+        </p>
+
+        <p>{{ investigation.mode|title }} Mode</p>
+    </div>
+
+    <div class="confidence-ring">
+        <strong>{{ investigation.ai_confidence }}%</strong>
+        <span>Confidence</span>
+    </div>
+</div>
+
+<div class="results-grid">
+    <div class="panel primary-finding">
+        <div class="eyebrow">Most Probable Source</div>
+        <h2>{{ investigation.ai_source }}</h2>
+        <p>{{ investigation.ai_cause }}</p>
+    </div>
+
+    <div class="panel">
+        <div class="eyebrow">Secondary Possibility</div>
+        <h3>{{ investigation.ai_secondary_source }}</h3>
+        <p class="muted">A secondary source should be inspected before final repair authorization.</p>
+    </div>
+
+    <div class="panel">
+        <div class="eyebrow">Urgency</div>
+        <h3>{{ investigation.ai_urgency }}</h3>
+        <p>{{ investigation.ai_summary }}</p>
+    </div>
+
+    <div class="panel">
+        <div class="eyebrow">Estimated Repair Range</div>
+        <h3>{{ investigation.ai_cost_range }}</h3>
+        <p class="muted">Range is preliminary and should be confirmed by site inspection.</p>
+    </div>
+</div>
+
+<div class="panel">
+    <h2>Weather Correlation</h2>
+
+    {% if investigation.weather_summary or investigation.weather_rainfall or investigation.weather_wind %}
+    <div class="results-grid">
+        <div>
+            <div class="eyebrow">Property Location</div>
+            <h3>{{ investigation.property_address or "Not provided" }}</h3>
+
+            {% if investigation.property_lat and investigation.property_lon %}
+            <p class="muted">
+                Coordinates:
+                {{ investigation.property_lat }},
+                {{ investigation.property_lon }}
+            </p>
+            {% endif %}
+        </div>
+
+        <div>
+            <div class="eyebrow">Weather Snapshot</div>
+            <h3>{{ investigation.weather_summary or "Weather data received" }}</h3>
+            <p>Rainfall: <strong>{{ investigation.weather_rainfall or "N/A" }}</strong></p>
+            <p>Wind: <strong>{{ investigation.weather_wind or "N/A" }}</strong></p>
         </div>
     </div>
+
+    <p class="muted">
+        Weather context helps determine whether the leak pattern is more consistent with
+        wind-driven rain, heavy rainfall volume, storm-created openings,
+        or recurring system failure.
+    </p>
+    {% else %}
+    <p class="muted">
+        No weather data was available for this case.
+        Enter a property address or ZIP during intake to enable weather correlation.
+    </p>
+    {% endif %}
+</div>
+
+<div class="panel">
+    <h2>GPS / AR Roof Search Zone</h2>
+
+    {% if investigation.interior_room
+          or investigation.nearest_wall
+          or investigation.distance_from_wall
+          or investigation.distance_from_corner %}
+    <p>
+        Based on the interior stain mapping,
+        the system projects the visible leak location upward
+        into a probable roof investigation zone.
+    </p>
 
     <div class="results-grid">
-        <div class="panel primary-finding">
-            <div class="eyebrow">Most Probable Source</div>
-            <h2>{{ investigation.ai_source }}</h2>
-            <p>{{ investigation.ai_cause }}</p>
+        <div>
+            <div class="eyebrow">Interior Marker</div>
+            <h3>{{ investigation.interior_room or "Interior area not specified" }}</h3>
+
+            <p>Nearest Wall: <strong>{{ investigation.nearest_wall or "N/A" }}</strong></p>
+            <p>Distance From Wall: <strong>{{ investigation.distance_from_wall or "N/A" }}</strong></p>
+            <p>Distance From Corner: <strong>{{ investigation.distance_from_corner or "N/A" }}</strong></p>
+            <p>Floor Level: <strong>{{ investigation.floor_level or "N/A" }}</strong></p>
         </div>
 
-        <div class="panel">
-            <div class="eyebrow">Secondary Possibility</div>
-            <h3>{{ investigation.ai_secondary_source }}</h3>
-            <p class="muted">A secondary source should be inspected before final repair authorization.</p>
-        </div>
-
-        <div class="panel">
-            <div class="eyebrow">Urgency</div>
-            <h3>{{ investigation.ai_urgency }}</h3>
-            <p>{{ investigation.ai_summary }}</p>
-        </div>
-
-        <div class="panel">
-            <div class="eyebrow">Estimated Repair Range</div>
-            <h3>{{ investigation.ai_cost_range }}</h3>
-            <p class="muted">Range is preliminary and should be confirmed by site inspection.</p>
-        </div>
-    </div>
-
-    <div class="panel">
-        <h2>Weather Correlation</h2>
-
-        {% if investigation.weather_summary or investigation.weather_rainfall or investigation.weather_wind %}
-            <div class="results-grid">
-                <div>
-                    <div class="eyebrow">Property Location</div>
-                    <h3>{{ investigation.property_address or "Not provided" }}</h3>
-
-                    {% if investigation.property_lat and investigation.property_lon %}
-                    <p class="muted">
-                        Coordinates:
-                        {{ investigation.property_lat }},
-                        {{ investigation.property_lon }}
-                    </p>
-                    {% endif %}
-                </div>
-
-                <div>
-                    <div class="eyebrow">Weather Snapshot</div>
-                    <h3>{{ investigation.weather_summary or "Weather data received" }}</h3>
-                    <p>
-                        Rainfall:
-                        <strong>{{ investigation.weather_rainfall or "N/A" }}</strong>
-                    </p>
-                    <p>
-                        Wind:
-                        <strong>{{ investigation.weather_wind or "N/A" }}</strong>
-                    </p>
-                </div>
-            </div>
-
-            <p class="muted">
-                Weather context helps determine whether the leak pattern is more consistent with
-                wind-driven rain, heavy rainfall volume, storm-created openings, or recurring system failure.
-            </p>
-        {% else %}
-            <p class="muted">
-                No weather data was available for this case. Enter a property address or ZIP during intake to enable weather correlation.
-            </p>
-        {% endif %}
-    </div>
-
-    <div class="panel">
-        <h2>GPS / AR Roof Search Zone</h2>
-
-        {% if investigation.interior_room or investigation.nearest_wall or investigation.distance_from_wall or investigation.distance_from_corner %}
+        <div>
+            <div class="eyebrow">Roof Investigation Guidance</div>
+            <h3>Projected Search Radius: 6–12 ft</h3>
             <p>
-                Based on the interior stain mapping, the system projects the visible leak location
-                upward into a probable roof investigation zone.
+                Start directly above the interior marker,
+                then inspect uphill based on roof slope,
+                water travel path,
+                valleys,
+                penetrations,
+                roof transitions,
+                and flashing assemblies.
             </p>
 
-            <div class="results-grid">
-                <div>
-                    <div class="eyebrow">Interior Marker</div>
-                    <h3>{{ investigation.interior_room or "Interior area not specified" }}</h3>
-
-                    <p>
-                        Nearest Wall:
-                        <strong>{{ investigation.nearest_wall or "N/A" }}</strong>
-                    </p>
-
-                    <p>
-                        Distance From Wall:
-                        <strong>{{ investigation.distance_from_wall or "N/A" }}</strong>
-                    </p>
-
-                    <p>
-                        Distance From Corner:
-                        <strong>{{ investigation.distance_from_corner or "N/A" }}</strong>
-                    </p>
-
-                    <p>
-                        Floor Level:
-                        <strong>{{ investigation.floor_level or "N/A" }}</strong>
-                    </p>
-                </div>
-
-                <div>
-                    <div class="eyebrow">Roof Investigation Guidance</div>
-                    <h3>Projected Search Radius: 6–12 ft</h3>
-                    <p>
-                        Start directly above the interior marker, then inspect uphill based on roof slope,
-                        water travel path, valleys, penetrations, roof transitions, and flashing assemblies.
-                    </p>
-                    <p class="muted">
-                        This is a search zone, not a guaranteed entry point. Water may travel before appearing inside.
-                    </p>
-                </div>
-            </div>
-        {% else %}
             <p class="muted">
-                No interior leak mapping was entered. Add room, wall, and distance measurements during intake
-                to generate a projected roof search zone.
+                This is a search zone, not a guaranteed entry point.
+                Water may travel before appearing inside.
             </p>
+        </div>
+    </div>
+    {% else %}
+    <p class="muted">
+        No interior leak mapping was entered.
+        Add room, wall, and distance measurements during intake
+        to generate a projected roof search zone.
+    </p>
+    {% endif %}
+</div>
+
+<div class="panel">
+    <h2>Recommended Confirmation</h2>
+    <p>{{ investigation.ai_confirmation_steps }}</p>
+</div>
+
+<div class="panel">
+    <h2>Recommended Repair Direction</h2>
+    <p>{{ investigation.ai_repair_recommendation }}</p>
+</div>
+
+<div class="panel">
+    <h2>AI Roof Probability Heatmap</h2>
+
+    <p class="muted">
+        This visual map shows the AI's recommended roof search zones
+        based on the reported symptoms,
+        roof system,
+        timing,
+        weather context,
+        and probable water travel behavior.
+    </p>
+
+    {% set roof_photo = none %}
+    {% for photo in photos %}
+        {% if photo.photo_stage == "exterior_photos" and roof_photo is none %}
+            {% set roof_photo = photo %}
         {% endif %}
+    {% endfor %}
+
+    <div class="layer-controls">
+        <button type="button" onclick="toggleLayer('heat-zone')">Toggle Heat Zones</button>
+        <button type="button" onclick="toggleLayer('roof-callout')">Toggle Callouts</button>
+        <button type="button" onclick="toggleLayer('roof-overlay-image')">Toggle Roof Photo</button>
+        <button type="button" onclick="toggleLayer('roof-label')">Toggle Labels</button>
     </div>
 
-    <div class="panel">
-        <h2>Recommended Confirmation</h2>
-        <p>{{ investigation.ai_confirmation_steps }}</p>
-    </div>
+    <div class="heatmap-card">
+        <div class="roof-heatmap">
 
-    <div class="panel">
-        <h2>Recommended Repair Direction</h2>
-        <p>{{ investigation.ai_repair_recommendation }}</p>
-    </div>
+            {% if roof_photo %}
+                <img
+                    class="roof-overlay-image"
+                    src="{{ url_for('static', filename=roof_photo.file_path) }}"
+                    alt="Uploaded exterior roof evidence">
+            {% endif %}
 
-    <div class="panel">
-        <h2>Uploaded Evidence</h2>
-
-        <div class="photo-grid">
-            {% for photo in photos %}
-            <div class="photo-card">
-                <img src="{{ url_for('static', filename=photo.file_path) }}">
-                <span>{{ photo.photo_stage.replace('_', ' ')|title }}</span>
+            {% for zone in heatmap_zones %}
+            <div
+                class="heat-zone heat-zone-{{ zone.severity }}"
+                data-x="{{ zone.x }}"
+                data-y="{{ zone.y }}"
+                data-radius="{{ zone.radius }}"
+                title="{{ zone.label }} - {{ zone.confidence }}%">
             </div>
             {% else %}
-            <p class="muted">No photos uploaded.</p>
+            <div class="roof-empty-message">
+                Heatmap will appear after the AI diagnosis runs.
+            </div>
+            {% endfor %}
+
+            {% for marker in callout_markers %}
+            <div
+                class="roof-callout"
+                data-x="{{ marker.x }}"
+                data-y="{{ marker.y }}">
+
+                <span></span>
+
+                <strong>{{ marker.label }}</strong>
+            </div>
+            {% endfor %}
+
+            <div class="roof-ridge-line"></div>
+
+            <div class="roof-label roof-label-top">
+                Uphill / Ridge Area
+            </div>
+
+            <div class="roof-label roof-label-bottom">
+                Downslope / Eave Area
+            </div>
+        </div>
+
+        <div class="heatmap-legend">
+            {% for zone in heatmap_zones %}
+            <div class="heatmap-row">
+                <span>
+                    <span class="legend-dot legend-{{ zone.severity }}"></span>
+                    <strong>{{ zone.label }}</strong>
+                </span>
+
+                <span>{{ zone.confidence }}%</span>
+            </div>
             {% endfor %}
         </div>
+
+        <div class="callout-list">
+    <h3>AI Inspection Callouts</h3>
+
+    {% for marker in callout_markers %}
+    <div class="callout-list-item">
+            <strong>{{ loop.index }}.</strong>
+            <span>{{ marker.label }}</span>
+        </div>
+        {% else %}
+        <p class="muted">No callout markers available yet.</p>
+        {% endfor %}
     </div>
 
-    <div class="panel">
-        <h2>Field Confirmation / Feedback</h2>
+        <div class="heatmap-guidance">
+            <h3>How to Use This Map</h3>
 
-        <form method="post" action="{{ url_for('feedback', investigation_id=investigation.id) }}" class="feedback-form">
-            <label>Was the AI correct?
-                <select name="was_correct">
-                    <option>Unknown</option>
-                    <option>Yes</option>
-                    <option>Partially</option>
-                    <option>No</option>
-                </select>
-            </label>
+            <p>
+                Start with the red zone first. Inspect any roof penetrations,
+                flashing, valleys, seams, fasteners, or transitions in that area.
+                Then move outward through the orange and yellow zones if the first
+                area does not confirm the leak.
+            </p>
 
-            <label>Actual Source
-                <input name="actual_source">
-            </label>
-
-            <label>Actual Cause
-                <input name="actual_cause">
-            </label>
-
-            <label>Actual Repair
-                <input name="actual_repair">
-            </label>
-
-            <label>Repair Cost
-                <input name="repair_cost">
-            </label>
-
-            <label>Reviewer Notes
-                <textarea name="reviewer_notes" rows="3"></textarea>
-            </label>
-
-            <button class="primary-btn" type="submit">Save Confirmation</button>
-        </form>
+            <p>
+                If an exterior roof photo was uploaded, this overlay uses that photo
+                as the visual reference. If no exterior roof overview was uploaded,
+                LeakTrace shows a generic roof probability map.
+            </p>
+        </div>
     </div>
+</div>
+
+<div class="panel">
+    <h2>Uploaded Evidence</h2>
+
+    <div class="photo-grid">
+        {% for photo in photos %}
+        <div class="photo-card">
+            <img src="{{ url_for('static', filename=photo.file_path) }}">
+            <span>{{ photo.photo_stage.replace('_', ' ')|title }}</span>
+        </div>
+        {% else %}
+        <p class="muted">No photos uploaded.</p>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="panel">
+    <h2>Field Confirmation / Feedback</h2>
+
+    <form method="post"
+          action="{{ url_for('feedback', investigation_id=investigation.id) }}"
+          class="feedback-form">
+
+        <label>
+            Was the AI correct?
+            <select name="was_correct">
+                <option>Unknown</option>
+                <option>Yes</option>
+                <option>Partially</option>
+                <option>No</option>
+            </select>
+        </label>
+
+        <label>
+            Actual Source
+            <input name="actual_source">
+        </label>
+
+        <label>
+            Actual Cause
+            <input name="actual_cause">
+        </label>
+
+        <label>
+            Actual Repair
+            <input name="actual_repair">
+        </label>
+
+        <label>
+            Repair Cost
+            <input name="repair_cost">
+        </label>
+
+        <label>
+            Reviewer Notes
+            <textarea name="reviewer_notes" rows="3"></textarea>
+        </label>
+
+        <button class="primary-btn" type="submit">
+            Save Confirmation
+        </button>
+    </form>
+</div>
+
+<script>
+    document.querySelectorAll(".heat-zone").forEach(function(zone) {
+        const x = parseFloat(zone.dataset.x || "50");
+        const y = parseFloat(zone.dataset.y || "50");
+        const radius = parseFloat(zone.dataset.radius || "20");
+
+        zone.style.left = x + "%";
+        zone.style.top = y + "%";
+        zone.style.width = (radius * 2) + "%";
+        zone.style.height = (radius * 2) + "%";
+        zone.style.marginLeft = "-" + radius + "%";
+        zone.style.marginTop = "-" + radius + "%";
+    });
+
+    document.querySelectorAll(".roof-callout").forEach(function(marker) {
+        const x = parseFloat(marker.dataset.x || "50");
+        const y = parseFloat(marker.dataset.y || "50");
+
+        marker.style.left = x + "%";
+        marker.style.top = y + "%";
+    });
+
+    function toggleLayer(className) {
+    document.querySelectorAll("." + className).forEach(function(el) {
+        el.classList.toggle("layer-hidden");
+    });
+    }
+</script>
+
 </section>
+
 {% endblock %}
