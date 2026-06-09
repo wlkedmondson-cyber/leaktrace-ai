@@ -11,8 +11,10 @@
 
     <div class="panel">
         <h2>Step 1 — Mark Interior Leak Point</h2>
-        <p>Stand directly below the visible stain or drip. The app captures several GPS samples and keeps the best reading.</p>
+        <p>Stand directly below the visible stain or drip. The app captures multiple GPS samples, rejects weak readings, and averages the best points.</p>
+
         <button class="primary-btn" type="button" onclick="captureInteriorPoint()">Mark Interior Point</button>
+
         <div id="interior-status" class="locator-status">
             {% if investigation.interior_lat and investigation.interior_lon %}
                 <p><strong>Interior point already saved.</strong></p>
@@ -59,6 +61,7 @@
             <h3 id="bearing-display">Target bearing: --</h3>
             <h3 id="heading-display">Phone heading: --</h3>
             <h3 id="accuracy-display">GPS accuracy: --</h3>
+            <h3 id="confidence-display">Locator confidence: --</h3>
             <h3 id="calibration-display">Calibration: --</h3>
             <p class="muted">This is a roof search zone, not a guaranteed entry point. Water can travel before appearing inside.</p>
         </div>
@@ -90,30 +93,49 @@ let currentHeading = null;
 let currentRoofPosition = null;
 let watchId = null;
 
-function feet(meters) { return meters * 3.28084; }
-function setHtml(id, html) { document.getElementById(id).innerHTML = html; }
-function setText(id, text) { document.getElementById(id).innerText = text; }
+function feet(meters) {
+    return meters * 3.28084;
+}
+
+function setHtml(id, html) {
+    document.getElementById(id).innerHTML = html;
+}
+
+function setText(id, text) {
+    document.getElementById(id).innerText = text;
+}
 
 function getBestHeading(event) {
-    if (typeof event.webkitCompassHeading === "number") return event.webkitCompassHeading;
-    if (typeof event.alpha === "number") return (360 - event.alpha + 360) % 360;
+    if (typeof event.webkitCompassHeading === "number") {
+        return event.webkitCompassHeading;
+    }
+
+    if (typeof event.alpha === "number") {
+        return (360 - event.alpha + 360) % 360;
+    }
+
     return null;
 }
 
 async function requestCompassPermissionIfNeeded() {
     try {
-        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+        if (
+            typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function"
+        ) {
             const response = await DeviceOrientationEvent.requestPermission();
             return response === "granted";
         }
     } catch (e) {
         console.log("Compass permission issue:", e);
     }
+
     return true;
 }
 
 async function startCompass() {
     const allowed = await requestCompassPermissionIfNeeded();
+
     if (!allowed) {
         setText("heading-display", "Phone heading: permission denied");
         return;
@@ -121,9 +143,13 @@ async function startCompass() {
 
     window.addEventListener("deviceorientation", function(event) {
         const heading = getBestHeading(event);
+
         if (heading !== null) {
             currentHeading = heading;
-            setText("heading-display", "Phone heading: " + heading.toFixed(0) + "° " + bearingToCardinal(heading));
+            setText(
+                "heading-display",
+                "Phone heading: " + heading.toFixed(0) + "° " + bearingToCardinal(heading)
+            );
         }
     }, true);
 }
@@ -141,7 +167,14 @@ function getBestGpsSample(sampleCount, statusId) {
 
         function takeSample() {
             attempts += 1;
-            if (statusId) setHtml(statusId, "<p>Capturing GPS sample " + attempts + " of " + maxAttempts + "...</p>");
+
+            if (statusId) {
+                setHtml(
+                    statusId,
+                    "<p>Capturing GPS sample " + attempts + " of " + maxAttempts + "...</p>" +
+                    "<p class='muted'>Hold the phone still. Better readings tighten the roof search zone.</p>"
+                );
+            }
 
             navigator.geolocation.getCurrentPosition(
                 function(position) {
@@ -155,12 +188,48 @@ function getBestGpsSample(sampleCount, statusId) {
                     if (attempts < maxAttempts) {
                         setTimeout(takeSample, 650);
                     } else {
-                        samples.sort(function(a, b) { return a.accuracy - b.accuracy; });
-                        resolve(samples[0]);
+                        samples.sort(function(a, b) {
+                            return a.accuracy - b.accuracy;
+                        });
+
+                        const filtered = samples.filter(function(s) {
+                            return s.accuracy <= 25;
+                        });
+
+                        const best = filtered.length ? filtered.slice(0, 5) : samples.slice(0, 5);
+
+                        let avgLat = 0;
+                        let avgLon = 0;
+                        let avgAccuracy = 0;
+
+                        best.forEach(function(s) {
+                            avgLat += s.lat;
+                            avgLon += s.lon;
+                            avgAccuracy += s.accuracy;
+                        });
+
+                        avgLat /= best.length;
+                        avgLon /= best.length;
+                        avgAccuracy /= best.length;
+
+                        resolve({
+                            lat: avgLat,
+                            lon: avgLon,
+                            accuracy: avgAccuracy,
+                            heading: currentHeading,
+                            samples_used: best.length,
+                            best_accuracy: best[0].accuracy
+                        });
                     }
                 },
-                function(err) { reject(err); },
-                { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+                function(err) {
+                    reject(err);
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 15000
+                }
             );
         }
 
@@ -170,8 +239,10 @@ function getBestGpsSample(sampleCount, statusId) {
 
 async function captureInteriorPoint() {
     await startCompass();
+
     try {
-        const payload = await getBestGpsSample(8, "interior-status");
+        const payload = await getBestGpsSample(14, "interior-status");
+
         const response = await fetch("/api/save-interior-point/" + leakCaseId, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -185,10 +256,12 @@ async function captureInteriorPoint() {
 
         setHtml(
             "interior-status",
-            "<p><strong>Interior point saved using best GPS sample.</strong></p>" +
+            "<p><strong>Interior point saved using averaged best GPS samples.</strong></p>" +
             "<p>Latitude: " + payload.lat.toFixed(6) + "</p>" +
             "<p>Longitude: " + payload.lon.toFixed(6) + "</p>" +
-            "<p>GPS accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p>Average GPS accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p>Best sample accuracy: ±" + payload.best_accuracy.toFixed(1) + " ft</p>" +
+            "<p>Samples used: " + payload.samples_used + "</p>" +
             "<p class='muted'>Reload this page before roof mode if the saved point does not appear.</p>"
         );
     } catch (err) {
@@ -207,7 +280,8 @@ async function captureCalibrationPoint(pointType) {
 
     try {
         setHtml("calibration-status", "<p>Capturing " + labels[pointType] + "...</p>");
-        const payload = await getBestGpsSample(6, "calibration-status");
+
+        const payload = await getBestGpsSample(10, "calibration-status");
         payload.point_type = pointType;
 
         const response = await fetch("/api/save-calibration-point/" + leakCaseId, {
@@ -223,8 +297,10 @@ async function captureCalibrationPoint(pointType) {
 
         setHtml(
             "calibration-status",
-            "<p><strong>" + labels[pointType] + " saved.</strong></p>" +
-            "<p>Accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p><strong>" + labels[pointType] + " saved using averaged best GPS samples.</strong></p>" +
+            "<p>Average accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p>Best sample accuracy: ±" + payload.best_accuracy.toFixed(1) + " ft</p>" +
+            "<p>Samples used: " + payload.samples_used + "</p>" +
             "<p class='muted'>Reload this page after saving both front corners to use calibrated guidance.</p>"
         );
     } catch (err) {
@@ -245,7 +321,9 @@ async function startRoofLocator() {
         return;
     }
 
-    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+    }
 
     watchId = navigator.geolocation.watchPosition(
         function(position) {
@@ -260,29 +338,67 @@ async function startRoofLocator() {
                 heading: currentHeading
             };
 
-            const distanceFeet = calculateDistanceFeet(currentLat, currentLon, targetInteriorLat, targetInteriorLon);
-            const bearing = calculateBearing(currentLat, currentLon, targetInteriorLat, targetInteriorLon);
-            const cardinal = bearingToCardinal(bearing);
+            const distanceFeet = calculateDistanceFeet(
+                currentLat,
+                currentLon,
+                targetInteriorLat,
+                targetInteriorLon
+            );
 
+            const bearing = calculateBearing(
+                currentLat,
+                currentLon,
+                targetInteriorLat,
+                targetInteriorLon
+            );
+
+            const cardinal = bearingToCardinal(bearing);
             const calibrated = hasCalibration();
-            const projectedRadius = calibrated
-                ? Math.min(25, Math.max(10, Math.min(Math.round(accuracyFeet), 18)))
-                : Math.min(45, Math.max(15, Math.round(accuracyFeet)));
+            const confidence = getLocatorConfidence(accuracyFeet, calibrated);
+            const projectedRadius = getProjectedRadius(accuracyFeet, calibrated);
 
             setText("distance-display", "Distance to marker: " + distanceFeet.toFixed(1) + " ft");
             setText("bearing-display", "Target bearing: " + bearing.toFixed(0) + "° " + cardinal);
             setText("accuracy-display", "GPS accuracy: ±" + accuracyFeet.toFixed(1) + " ft");
             setText("zone-display", "Projected Zone Radius: " + projectedRadius + " ft");
-            setText("calibration-display", calibrated ? "Calibration: enabled — tightened search zone" : "Calibration: not complete — GPS-only fallback");
+            setText("confidence-display", "Locator confidence: " + confidence.label);
+            setText(
+                "calibration-display",
+                calibrated
+                    ? "Calibration: enabled — tightened search zone"
+                    : "Calibration: not complete — GPS-only fallback"
+            );
+
+            if (accuracyFeet > 35) {
+                setHtml(
+                    "roof-status",
+                    "<h2>GPS signal is loose</h2>" +
+                    "<p>Current accuracy is ±" + accuracyFeet.toFixed(1) + " ft. Pause, stand still, and wait for the phone to improve the signal before relying on the locator.</p>"
+                );
+                return;
+            }
 
             if (distanceFeet <= projectedRadius) {
-                setHtml("roof-status", "<h2>Inside projected roof search zone</h2><p>Inspect uphill first: penetrations, valleys, ridge/sidewall transitions, fasteners, and flashing.</p>");
+                setHtml(
+                    "roof-status",
+                    "<h2>Inside projected roof search zone</h2>" +
+                    "<p>Inspect uphill first: penetrations, valleys, ridge/sidewall transitions, fasteners, and flashing.</p>"
+                );
             } else {
-                setHtml("roof-status", "<p>Move toward <strong>" + cardinal + "</strong>. Search zone begins around " + projectedRadius + " ft from the marker.</p>");
+                setHtml(
+                    "roof-status",
+                    "<p>Move toward <strong>" + cardinal + "</strong>. Search zone begins around " + projectedRadius + " ft from the marker.</p>"
+                );
             }
         },
-        function(err) { alert("GPS error: " + err.message); },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        function(err) {
+            alert("GPS error: " + err.message);
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 15000
+        }
     );
 }
 
@@ -303,7 +419,43 @@ async function saveCurrentRoofPoint() {
         return;
     }
 
-    setHtml("roof-status", document.getElementById("roof-status").innerHTML + "<p><strong>Current roof position saved to this case.</strong></p>");
+    setHtml(
+        "roof-status",
+        document.getElementById("roof-status").innerHTML +
+        "<p><strong>Current roof position saved to this case.</strong></p>"
+    );
+}
+
+function getProjectedRadius(accuracyFeet, calibrated) {
+    if (calibrated) {
+        if (accuracyFeet <= 10) return 8;
+        if (accuracyFeet <= 15) return 10;
+        if (accuracyFeet <= 20) return 14;
+        if (accuracyFeet <= 25) return 18;
+        return 24;
+    }
+
+    if (accuracyFeet <= 10) return 12;
+    if (accuracyFeet <= 15) return 16;
+    if (accuracyFeet <= 20) return 22;
+    if (accuracyFeet <= 25) return 28;
+    return 35;
+}
+
+function getLocatorConfidence(accuracyFeet, calibrated) {
+    if (calibrated && accuracyFeet <= 15) {
+        return {label: "High"};
+    }
+
+    if (accuracyFeet <= 25) {
+        return {label: calibrated ? "Medium-High" : "Medium"};
+    }
+
+    if (accuracyFeet <= 35) {
+        return {label: "Loose"};
+    }
+
+    return {label: "Poor GPS"};
 }
 
 function hasCalibration() {
@@ -337,6 +489,7 @@ function calculateBearing(lat1, lon1, lat2, lon2) {
     const deltaLambda = (lon2 - lon1) * Math.PI / 180;
 
     const y = Math.sin(deltaLambda) * Math.cos(phi2);
+
     const x =
         Math.cos(phi1) * Math.sin(phi2) -
         Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
