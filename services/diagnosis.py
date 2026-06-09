@@ -1,7 +1,17 @@
 import os
+import json
+import base64
+import mimetypes
 from dotenv import load_dotenv
 
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
+
 load_dotenv()
+
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 
 def has_any(text, terms):
@@ -10,9 +20,31 @@ def has_any(text, terms):
 
 def run_leak_investigation(case, photos):
     """
-    V1 hybrid diagnosis engine with roof probability heatmap support.
+    Hybrid diagnosis engine:
+    1. Local rules engine always runs.
+    2. OpenAI Vision runs when OPENAI_API_KEY exists and photos are present.
+    3. Vision output enhances source, cause, confidence, callouts, and recommendations.
+    4. If Vision fails, local rules remain the fallback.
     """
 
+    local_result = run_local_rules_engine(case, photos)
+
+    ai_result = None
+
+    if OPENAI_API_KEY and photos and OpenAI is not None:
+        try:
+            ai_result = run_openai_vision_analysis(case, photos)
+        except Exception as e:
+            print("OpenAI Vision analysis failed:", e)
+            ai_result = None
+
+    if ai_result:
+        return merge_ai_with_local(local_result, ai_result)
+
+    return local_result
+
+
+def run_local_rules_engine(case, photos):
     symptom = (case.get("symptom_type") or "").lower()
     location = (case.get("symptom_location") or "").lower()
     timing = (case.get("leak_timing") or "").lower()
@@ -199,7 +231,226 @@ def run_leak_investigation(case, photos):
         "estimated_cost_range": build_cost_range(top_source),
         "heatmap_zones": heatmap_zones,
         "callout_markers": callout_markers,
+        "ai_visual_observations": "",
+        "ai_used_openai": False,
     }
+
+
+def run_openai_vision_analysis(case, photos):
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    image_items = []
+
+    for photo in photos[:6]:
+        file_path = photo.get("file_path") or ""
+        full_path = os.path.join(os.getcwd(), "static", file_path)
+
+        if not os.path.exists(full_path):
+            continue
+
+        mime_type = mimetypes.guess_type(full_path)[0] or "image/jpeg"
+
+        with open(full_path, "rb") as image_file:
+            encoded = base64.b64encode(image_file.read()).decode("utf-8")
+
+        image_items.append({
+            "type": "input_image",
+            "image_url": f"data:{mime_type};base64,{encoded}",
+        })
+
+    if not image_items:
+        return None
+
+    prompt_text = build_openai_prompt(case, photos)
+
+    response = client.responses.create(
+        model=os.environ.get("OPENAI_VISION_MODEL", "gpt-4.1-mini"),
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": prompt_text
+                    },
+                    *image_items
+                ]
+            }
+        ],
+        temperature=0.2,
+        max_output_tokens=1200,
+    )
+
+    raw_text = response.output_text.strip()
+
+    try:
+        return json.loads(clean_json_response(raw_text))
+    except Exception:
+        print("OpenAI returned non-JSON response:", raw_text)
+        return {
+            "probable_source": None,
+            "probable_cause": raw_text,
+            "confidence_adjustment": 0,
+            "visual_observations": raw_text,
+            "callout_markers": [],
+        }
+
+
+def build_openai_prompt(case, photos):
+    photo_summary = []
+
+    for photo in photos:
+        photo_summary.append(
+            f"- Stage: {photo.get('photo_stage')}; Filename: {photo.get('original_filename')}"
+        )
+
+    return f"""
+You are assisting with a roof and water intrusion investigation.
+
+Analyze the uploaded evidence photos and the case facts. 
+Return ONLY valid JSON. Do not include markdown. Do not include commentary outside JSON.
+
+Your job:
+- identify visible roof/water intrusion clues
+- identify likely leak source category
+- identify visible defects only when actually visible
+- avoid pretending certainty
+- produce practical forensic inspection callouts
+- keep recommendations contractor-safe
+
+Case facts:
+Property type: {case.get("property_type")}
+Symptom type: {case.get("symptom_type")}
+Symptom location: {case.get("symptom_location")}
+Leak timing: {case.get("leak_timing")}
+Storm context: {case.get("storm_context")}
+Roof type: {case.get("roof_type")}
+Roof age: {case.get("roof_age")}
+Known features: {case.get("known_features")}
+Description: {case.get("description")}
+Weather summary: {case.get("weather_summary")}
+Rainfall: {case.get("weather_rainfall")}
+Wind: {case.get("weather_wind")}
+
+Uploaded photo stages:
+{chr(10).join(photo_summary)}
+
+Return JSON exactly in this structure:
+{{
+  "probable_source": "short source label or null",
+  "probable_cause": "1-3 sentence visual/case-based cause explanation",
+  "secondary_possibility": "short secondary source label or null",
+  "confidence_adjustment": 0,
+  "visual_observations": "short paragraph of visible observations",
+  "confirmation_steps": "contractor-safe confirmation steps",
+  "repair_recommendation": "safe repair direction, not a guaranteed scope",
+  "callout_markers": [
+    {{"x": 50, "y": 42, "label": "short visual inspection callout"}}
+  ]
+}}
+
+Marker placement rules:
+- x and y are percentages on the roof/photo panel.
+- Use 2 to 4 callouts maximum.
+- If placement is uncertain, use approximate positions matching likely search areas.
+- Do not claim damage is visible unless it is actually visible.
+"""
+
+
+def clean_json_response(text):
+    cleaned = text.strip()
+
+    if cleaned.startswith("```json"):
+        cleaned = cleaned.replace("```json", "", 1).strip()
+
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```", "", 1).strip()
+
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].strip()
+
+    return cleaned
+
+
+def merge_ai_with_local(local_result, ai_result):
+    merged = dict(local_result)
+
+    ai_source = ai_result.get("probable_source")
+    ai_cause = ai_result.get("probable_cause")
+    ai_secondary = ai_result.get("secondary_possibility")
+    ai_confirmation = ai_result.get("confirmation_steps")
+    ai_repair = ai_result.get("repair_recommendation")
+    ai_observations = ai_result.get("visual_observations")
+    ai_callouts = ai_result.get("callout_markers") or []
+
+    confidence_adjustment = ai_result.get("confidence_adjustment") or 0
+
+    try:
+        confidence_adjustment = float(confidence_adjustment)
+    except Exception:
+        confidence_adjustment = 0
+
+    if ai_source:
+        merged["probable_source"] = ai_source
+
+    if ai_cause:
+        merged["probable_cause"] = ai_cause
+
+    if ai_secondary:
+        merged["secondary_possibility"] = ai_secondary
+
+    if ai_confirmation:
+        merged["confirmation_steps"] = ai_confirmation
+
+    if ai_repair:
+        merged["repair_recommendation"] = ai_repair
+
+    if ai_callouts:
+        merged["callout_markers"] = normalize_callout_markers(ai_callouts)
+
+    confidence = merged.get("confidence") or 70
+    merged["confidence"] = min(94, max(50, round(float(confidence) + confidence_adjustment, 1)))
+
+    merged["heatmap_zones"] = build_heatmap_zones(
+        merged["probable_source"],
+        merged["confidence"]
+    )
+
+    if ai_observations:
+        merged["summary"] = (
+            merged.get("summary", "") +
+            " Visual AI observations: " +
+            ai_observations
+        )
+
+    merged["ai_visual_observations"] = ai_observations or ""
+    merged["ai_used_openai"] = True
+
+    return merged
+
+
+def normalize_callout_markers(markers):
+    normalized = []
+
+    for marker in markers[:4]:
+        try:
+            x = float(marker.get("x", 50))
+            y = float(marker.get("y", 45))
+            label = str(marker.get("label", "Inspect this area")).strip()
+
+            x = min(92, max(8, x))
+            y = min(92, max(8, y))
+
+            if label:
+                normalized.append({
+                    "x": x,
+                    "y": y,
+                    "label": label[:90],
+                })
+        except Exception:
+            continue
+
+    return normalized
 
 
 def build_heatmap_zones(source, confidence):
@@ -251,6 +502,7 @@ def build_heatmap_zones(source, confidence):
         },
     ]
 
+
 def build_callout_markers(source):
     if "Penetration" in source or "Vent" in source:
         return [
@@ -298,6 +550,7 @@ def build_callout_markers(source):
         {"x": 52, "y": 45, "label": "Inspect likely roof field damage"},
         {"x": 61, "y": 38, "label": "Check fasteners / lifted material"},
     ]
+
 
 def build_summary(source, roof_type, has_chimney, has_skylight, has_pipe_or_vent):
     return (
