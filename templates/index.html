@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+    <div class="hero-copy">
+        <div class="eyebrow">AI-Assisted Water Intrusion Intelligence</div>
+        <h1>Investigate leaks with forensic-level guidance.</h1>
+        <p>
+            LeakTrace AI analyzes symptoms, property conditions, weather context, and visual evidence
+            to identify probable water intrusion sources and next-step repairs.
+        </p>
+
+        <form method="post" action="{{ url_for('start_investigation') }}" class="mode-grid">
+            <button name="mode" value="consumer" class="mode-card">
+                <span>Consumer</span>
+                <small>Plain-language guidance and urgency.</small>
+            </button>
+            <button name="mode" value="contractor" class="mode-card">
+                <span>Contractor</span>
+                <small>Technical findings, repair scope, and customer report.</small>
+            </button>
+            <button name="mode" value="insurance" class="mode-card">
+                <span>Insurance</span>
+                <small>Evidence-heavy cause, origin, and documentation flow.</small>
+            </button>
+        </form>
+    </div>
+
+    <div class="hero-panel">
+        <div class="scan-card">
+            <div class="scan-line"></div>
+            <h3>Investigation Engine</h3>
+            <ul>
+                <li>Symptom correlation</li>
+                <li>Environmental analysis</li>
+                <li>Visual evidence review</li>
+                <li>Water path reconstruction</li>
+                <li>Confidence scoring</li>
+            </ul>
+        </div>
+    </div>
+</section>
+{% endblock %}

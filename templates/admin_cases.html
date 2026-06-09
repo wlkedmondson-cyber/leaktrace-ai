@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+    <div class="case-header">
+        <div>
+            <div class="eyebrow">Internal Review</div>
+            <h1>Investigation Cases</h1>
+        </div>
+    </div>
+
+    <div class="panel">
+        <table>
+            <thead>
+                <tr>
+                    <th>Case</th>
+                    <th>Mode</th>
+                    <th>Symptom</th>
+                    <th>Source</th>
+                    <th>Confidence</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in cases %}
+                <tr>
+                    <td><a href="{{ url_for('results', investigation_id=c.id) }}">{{ c.case_number }}</a></td>
+                    <td>{{ c.mode }}</td>
+                    <td>{{ c.symptom_type or "-" }}</td>
+                    <td>{{ c.ai_source or "Pending" }}</td>
+                    <td>{{ c.ai_confidence or "-" }}</td>
+                    <td>{{ c.created_at }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">No cases yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

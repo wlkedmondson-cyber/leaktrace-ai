@@ -1,0 +1,12 @@
+
+# Render Deployment
+
+## Build Command
+pip install -r requirements.txt
+
+## Start Command
+gunicorn app:app
+
+## Environment Variables
+SECRET_KEY=your-secret
+OPENAI_API_KEY=your-openai-api-key

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wizard-shell">
+    <div class="case-header">
+        <div>
+            <div class="eyebrow">Case {{ investigation.case_number }}</div>
+            <h1>Guided Leak Investigation</h1>
+            <p>Mode: {{ investigation.mode|title }}</p>
+        </div>
+        <div class="status-stack">
+            <span>01 Symptoms</span>
+            <span>02 Weather</span>
+            <span>03 Interior Mapping</span>
+            <span>04 Visual Evidence</span>
+            <span>05 AI Analysis</span>
+        </div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="investigation-form">
+
+        <div class="panel">
+            <h2>Tell us what happened.</h2>
+
+            <div class="grid-2">
+                <label>Property Type
+                    <select name="property_type">
+                        <option>Residential</option>
+                        <option>Commercial</option>
+                        <option>Multi-family</option>
+                        <option>Industrial</option>
+                    </select>
+                </label>
+
+                <label>Property Address / ZIP
+                    <input name="property_address" placeholder="Example: 123 Main St, Valdosta GA">
+                </label>
+
+                <label>Primary Symptom
+                    <select name="symptom_type">
+                        <option>Active dripping</option>
+                        <option>Ceiling stain</option>
+                        <option>Wall staining</option>
+                        <option>Bubbling paint</option>
+                        <option>Musty smell</option>
+                        <option>Mold or moisture</option>
+                        <option>Storm damage concern</option>
+                        <option>Unknown moisture source</option>
+                    </select>
+                </label>
+
+                <label>Where is it showing?
+                    <input name="symptom_location" placeholder="Example: dining room ceiling near fireplace">
+                </label>
+
+                <label>When does it happen?
+                    <select name="leak_timing">
+                        <option>Heavy rain only</option>
+                        <option>Wind-driven rain</option>
+                        <option>Long steady rain</option>
+                        <option>Every rain</option>
+                        <option>After storms</option>
+                        <option>Random/intermittent</option>
+                    </select>
+                </label>
+
+                <label>Recent Weather / Event
+                    <input name="storm_context" placeholder="Example: high winds last week, hail, tropical storm">
+                </label>
+
+                <label>Approximate Roof Age
+                    <input name="roof_age" placeholder="Example: 12 years">
+                </label>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Roof System Identification</h2>
+            <p class="muted">
+                Different roofing systems fail differently. Investigation logic adapts to the selected roof assembly.
+            </p>
+
+            <div class="roof-system-grid">
+                <label class="roof-card">
+                    <input type="radio" name="roof_type" value="Architectural Asphalt Shingle" checked>
+                    <strong>Architectural Asphalt Shingle</strong>
+                    <span>Pipe boots, valleys, ridge vents, nail pops, step flashing</span>
+                </label>
+
+                <label class="roof-card">
+                    <input type="radio" name="roof_type" value="3-Tab Asphalt Shingle">
+                    <strong>3-Tab Asphalt Shingle</strong>
+                    <span>Age wear, brittle tabs, lifted shingles, nail pops, flashing</span>
+                </label>
+
+                <label class="roof-card">
+                    <input type="radio" name="roof_type" value="Standing Seam Metal">
+                    <strong>Standing Seam Metal</strong>
+                    <span>Panel seams, thermal movement, penetrations, ridge transitions</span>
+                </label>
+
+                <label class="roof-card">
+                    <input type="radio" name="roof_type" value="Exposed Fastener Metal">
+                    <strong>Exposed Fastener Metal</strong>
+                    <span>Neoprene washers, backed-out screws, ridge caps, penetrations</span>
+                </label>
+            </div>
+
+            <h3>Roof Complexity Indicators</h3>
+            <div class="chip-grid">
+                {% for feature in ["chimney", "skylight", "pipe vent", "ridge vent", "valley", "sidewall", "gutter/eave", "satellite/fasteners", "multiple roof levels", "roof transitions", "low slope sections", "dormers", "HVAC equipment nearby", "HVAC/plumbing nearby"] %}
+                <label class="chip">
+                    <input type="checkbox" name="known_features" value="{{ feature }}"> {{ feature }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>GPS Stain-to-Roof Locator</h2>
+            <p class="muted">
+                No manual wall measurements are required here. After the investigation is created,
+                open the GPS Roof Locator from the results page.
+            </p>
+
+            <div class="results-grid">
+                <div>
+                    <div class="eyebrow">Step 1</div>
+                    <h3>Stand under the stain</h3>
+                    <p>Use your phone to mark the interior leak point with GPS.</p>
+                </div>
+
+                <div>
+                    <div class="eyebrow">Step 2</div>
+                    <h3>Move outside or onto the roof</h3>
+                    <p>The locator shows distance, bearing, phone heading, and search-zone status.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Investigation Notes</h2>
+
+            <label>Describe anything else important
+                <textarea name="description" rows="4" placeholder="Example: stain is directly below a vent pipe, only leaks when rain blows from the west, previous repair was done last year..."></textarea>
+            </label>
+        </div>
+
+        <div class="panel">
+            <h2>Visual Evidence Capture</h2>
+            <p class="muted">
+                Upload what you have. The system is strongest when it sees symptoms, attic conditions, exterior roof context, and closeups of suspected entry points.
+            </p>
+
+            <div class="upload-grid">
+                <label>Symptom Photos
+                    <input type="file" name="symptom_photos" multiple accept="image/*">
+                </label>
+
+                <label>Interior Photos
+                    <input type="file" name="interior_photos" multiple accept="image/*">
+                </label>
+
+                <label>Attic Photos
+                    <input type="file" name="attic_photos" multiple accept="image/*">
+                </label>
+
+                <label>Exterior Roof Overview
+                    <input type="file" name="exterior_photos" multiple accept="image/*">
+                </label>
+
+                <label>Closeups / Suspected Entry Points
+                    <input type="file" name="detail_photos" multiple accept="image/*">
+                </label>
+            </div>
+        </div>
+
+        <button class="primary-btn" type="submit">Run Water Intrusion Analysis</button>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+    <div class="case-header">
+        <div>
+            <div class="eyebrow">Case {{ investigation.case_number }}</div>
+            <h1>Stain-to-Roof Locator</h1>
+            <p>GPS + compass + structure calibration roof search guidance</p>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Step 1 — Mark Interior Leak Point</h2>
+        <p>Stand directly below the visible stain or drip. The app captures several GPS samples and keeps the best reading.</p>
+        <button class="primary-btn" type="button" onclick="captureInteriorPoint()">Mark Interior Point</button>
+        <div id="interior-status" class="locator-status">
+            {% if investigation.interior_lat and investigation.interior_lon %}
+                <p><strong>Interior point already saved.</strong></p>
+                <p>Latitude: {{ "%.6f"|format(investigation.interior_lat) }}</p>
+                <p>Longitude: {{ "%.6f"|format(investigation.interior_lon) }}</p>
+                {% if investigation.interior_accuracy %}
+                    <p>Accuracy: ±{{ "%.1f"|format(investigation.interior_accuracy) }} ft</p>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Step 2 — Calibrate the Structure</h2>
+        <p>Mark two known building points outside. This lets the locator tighten the zone instead of trusting raw GPS alone.</p>
+
+        <div class="grid-2">
+            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_left')">Mark Front-Left Corner</button>
+            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('front_right')">Mark Front-Right Corner</button>
+            <button class="primary-btn" type="button" onclick="captureCalibrationPoint('ridge')">Optional: Mark Ridge / Roof Feature</button>
+        </div>
+
+        <div id="calibration-status" class="locator-status">
+            {% if investigation.cal_front_left_lat and investigation.cal_front_right_lat %}
+                <p><strong>Structure calibration has two reference points saved.</strong></p>
+            {% else %}
+                <p class="muted">Mark at least front-left and front-right corners for tighter guidance.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Step 3 — Roof Locator Mode</h2>
+        <p>Move onto the roof or near the roof edge, then start the locator.</p>
+
+        <button class="primary-btn" type="button" onclick="startRoofLocator()">Start Roof Locator</button>
+        <button class="primary-btn" type="button" onclick="saveCurrentRoofPoint()">Save Current Roof Position</button>
+
+        <div id="roof-status" class="locator-status"></div>
+
+        <div class="panel" style="margin-top:18px;">
+            <h2 id="zone-display">Projected Zone: --</h2>
+            <h3 id="distance-display">Distance to marker: --</h3>
+            <h3 id="bearing-display">Target bearing: --</h3>
+            <h3 id="heading-display">Phone heading: --</h3>
+            <h3 id="accuracy-display">GPS accuracy: --</h3>
+            <h3 id="calibration-display">Calibration: --</h3>
+            <p class="muted">This is a roof search zone, not a guaranteed entry point. Water can travel before appearing inside.</p>
+        </div>
+    </div>
+</section>
+
+<script id="locator-data" type="application/json">
+{
+    "caseId": {{ investigation.id|tojson }},
+    "interiorLat": {{ investigation.interior_lat|tojson }},
+    "interiorLon": {{ investigation.interior_lon|tojson }},
+    "interiorAccuracy": {{ investigation.interior_accuracy|tojson }},
+    "frontLeftLat": {{ investigation.cal_front_left_lat|tojson }},
+    "frontLeftLon": {{ investigation.cal_front_left_lon|tojson }},
+    "frontRightLat": {{ investigation.cal_front_right_lat|tojson }},
+    "frontRightLon": {{ investigation.cal_front_right_lon|tojson }},
+    "ridgeLat": {{ investigation.cal_ridge_lat|tojson }},
+    "ridgeLon": {{ investigation.cal_ridge_lon|tojson }}
+}
+</script>
+
+<script>
+const locatorData = JSON.parse(document.getElementById("locator-data").textContent);
+const leakCaseId = locatorData.caseId;
+const targetInteriorLat = locatorData.interiorLat;
+const targetInteriorLon = locatorData.interiorLon;
+
+let currentHeading = null;
+let currentRoofPosition = null;
+let watchId = null;
+
+function feet(meters) { return meters * 3.28084; }
+function setHtml(id, html) { document.getElementById(id).innerHTML = html; }
+function setText(id, text) { document.getElementById(id).innerText = text; }
+
+function getBestHeading(event) {
+    if (typeof event.webkitCompassHeading === "number") return event.webkitCompassHeading;
+    if (typeof event.alpha === "number") return (360 - event.alpha + 360) % 360;
+    return null;
+}
+
+async function requestCompassPermissionIfNeeded() {
+    try {
+        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+            const response = await DeviceOrientationEvent.requestPermission();
+            return response === "granted";
+        }
+    } catch (e) {
+        console.log("Compass permission issue:", e);
+    }
+    return true;
+}
+
+async function startCompass() {
+    const allowed = await requestCompassPermissionIfNeeded();
+    if (!allowed) {
+        setText("heading-display", "Phone heading: permission denied");
+        return;
+    }
+
+    window.addEventListener("deviceorientation", function(event) {
+        const heading = getBestHeading(event);
+        if (heading !== null) {
+            currentHeading = heading;
+            setText("heading-display", "Phone heading: " + heading.toFixed(0) + "° " + bearingToCardinal(heading));
+        }
+    }, true);
+}
+
+function getBestGpsSample(sampleCount, statusId) {
+    return new Promise(function(resolve, reject) {
+        if (!navigator.geolocation) {
+            reject(new Error("GPS is not available on this device/browser."));
+            return;
+        }
+
+        let samples = [];
+        let attempts = 0;
+        const maxAttempts = sampleCount;
+
+        function takeSample() {
+            attempts += 1;
+            if (statusId) setHtml(statusId, "<p>Capturing GPS sample " + attempts + " of " + maxAttempts + "...</p>");
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    samples.push({
+                        lat: position.coords.latitude,
+                        lon: position.coords.longitude,
+                        accuracy: feet(position.coords.accuracy),
+                        heading: currentHeading
+                    });
+
+                    if (attempts < maxAttempts) {
+                        setTimeout(takeSample, 650);
+                    } else {
+                        samples.sort(function(a, b) { return a.accuracy - b.accuracy; });
+                        resolve(samples[0]);
+                    }
+                },
+                function(err) { reject(err); },
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+            );
+        }
+
+        takeSample();
+    });
+}
+
+async function captureInteriorPoint() {
+    await startCompass();
+    try {
+        const payload = await getBestGpsSample(8, "interior-status");
+        const response = await fetch("/api/save-interior-point/" + leakCaseId, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            alert("Interior point failed to save.");
+            return;
+        }
+
+        setHtml(
+            "interior-status",
+            "<p><strong>Interior point saved using best GPS sample.</strong></p>" +
+            "<p>Latitude: " + payload.lat.toFixed(6) + "</p>" +
+            "<p>Longitude: " + payload.lon.toFixed(6) + "</p>" +
+            "<p>GPS accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p class='muted'>Reload this page before roof mode if the saved point does not appear.</p>"
+        );
+    } catch (err) {
+        alert("GPS error: " + err.message);
+    }
+}
+
+async function captureCalibrationPoint(pointType) {
+    await startCompass();
+
+    const labels = {
+        "front_left": "Front-left corner",
+        "front_right": "Front-right corner",
+        "ridge": "Ridge / roof feature"
+    };
+
+    try {
+        setHtml("calibration-status", "<p>Capturing " + labels[pointType] + "...</p>");
+        const payload = await getBestGpsSample(6, "calibration-status");
+        payload.point_type = pointType;
+
+        const response = await fetch("/api/save-calibration-point/" + leakCaseId, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            alert("Calibration point failed to save.");
+            return;
+        }
+
+        setHtml(
+            "calibration-status",
+            "<p><strong>" + labels[pointType] + " saved.</strong></p>" +
+            "<p>Accuracy: ±" + payload.accuracy.toFixed(1) + " ft</p>" +
+            "<p class='muted'>Reload this page after saving both front corners to use calibrated guidance.</p>"
+        );
+    } catch (err) {
+        alert("GPS error: " + err.message);
+    }
+}
+
+async function startRoofLocator() {
+    await startCompass();
+
+    if (targetInteriorLat === null || targetInteriorLon === null) {
+        alert("No interior point saved yet. Mark the interior leak point first.");
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        alert("GPS is not available on this device/browser.");
+        return;
+    }
+
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+
+    watchId = navigator.geolocation.watchPosition(
+        function(position) {
+            const currentLat = position.coords.latitude;
+            const currentLon = position.coords.longitude;
+            const accuracyFeet = feet(position.coords.accuracy);
+
+            currentRoofPosition = {
+                lat: currentLat,
+                lon: currentLon,
+                accuracy: accuracyFeet,
+                heading: currentHeading
+            };
+
+            const distanceFeet = calculateDistanceFeet(currentLat, currentLon, targetInteriorLat, targetInteriorLon);
+            const bearing = calculateBearing(currentLat, currentLon, targetInteriorLat, targetInteriorLon);
+            const cardinal = bearingToCardinal(bearing);
+
+            const calibrated = hasCalibration();
+            const projectedRadius = calibrated
+                ? Math.min(25, Math.max(10, Math.min(Math.round(accuracyFeet), 18)))
+                : Math.min(45, Math.max(15, Math.round(accuracyFeet)));
+
+            setText("distance-display", "Distance to marker: " + distanceFeet.toFixed(1) + " ft");
+            setText("bearing-display", "Target bearing: " + bearing.toFixed(0) + "° " + cardinal);
+            setText("accuracy-display", "GPS accuracy: ±" + accuracyFeet.toFixed(1) + " ft");
+            setText("zone-display", "Projected Zone Radius: " + projectedRadius + " ft");
+            setText("calibration-display", calibrated ? "Calibration: enabled — tightened search zone" : "Calibration: not complete — GPS-only fallback");
+
+            if (distanceFeet <= projectedRadius) {
+                setHtml("roof-status", "<h2>Inside projected roof search zone</h2><p>Inspect uphill first: penetrations, valleys, ridge/sidewall transitions, fasteners, and flashing.</p>");
+            } else {
+                setHtml("roof-status", "<p>Move toward <strong>" + cardinal + "</strong>. Search zone begins around " + projectedRadius + " ft from the marker.</p>");
+            }
+        },
+        function(err) { alert("GPS error: " + err.message); },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+    );
+}
+
+async function saveCurrentRoofPoint() {
+    if (!currentRoofPosition) {
+        alert("Start Roof Locator first.");
+        return;
+    }
+
+    const response = await fetch("/api/save-roof-point/" + leakCaseId, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(currentRoofPosition)
+    });
+
+    if (!response.ok) {
+        alert("Roof position failed to save.");
+        return;
+    }
+
+    setHtml("roof-status", document.getElementById("roof-status").innerHTML + "<p><strong>Current roof position saved to this case.</strong></p>");
+}
+
+function hasCalibration() {
+    return (
+        locatorData.frontLeftLat !== null &&
+        locatorData.frontLeftLon !== null &&
+        locatorData.frontRightLat !== null &&
+        locatorData.frontRightLon !== null
+    );
+}
+
+function calculateDistanceFeet(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const p1 = lat1 * Math.PI / 180;
+    const p2 = lat2 * Math.PI / 180;
+    const dp = (lat2 - lat1) * Math.PI / 180;
+    const dl = (lon2 - lon1) * Math.PI / 180;
+
+    const a =
+        Math.sin(dp / 2) * Math.sin(dp / 2) +
+        Math.cos(p1) * Math.cos(p2) *
+        Math.sin(dl / 2) * Math.sin(dl / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return feet(R * c);
+}
+
+function calculateBearing(lat1, lon1, lat2, lon2) {
+    const phi1 = lat1 * Math.PI / 180;
+    const phi2 = lat2 * Math.PI / 180;
+    const deltaLambda = (lon2 - lon1) * Math.PI / 180;
+
+    const y = Math.sin(deltaLambda) * Math.cos(phi2);
+    const x =
+        Math.cos(phi1) * Math.sin(phi2) -
+        Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function bearingToCardinal(bearing) {
+    const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    return directions[Math.round(bearing / 45) % 8];
+}
+</script>
+{% endblock %}
