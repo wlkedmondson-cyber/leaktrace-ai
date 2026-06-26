@@ -3,20 +3,85 @@
 <section class="results-shell">
     <div class="case-header">
         <div>
-            <div class="eyebrow">Internal Review</div>
-            <h1>Investigation Cases</h1>
+            <div class="eyebrow">Operations Dashboard</div>
+            <h1>LeakTrace Cases</h1>
+            <p class="muted">Track open jobs, AI-complete reports, customer files, claim fields, and verification status.</p>
+        </div>
+        <a class="primary-btn" href="/">Start New Case</a>
+    </div>
+
+    <div class="metric-grid">
+        <div class="metric-card">
+            <span>Total Cases</span>
+            <strong>{{ stats.total_cases or 0 }}</strong>
+        </div>
+        <div class="metric-card">
+            <span>Open / Active</span>
+            <strong>{{ stats.open_cases or 0 }}</strong>
+        </div>
+        <div class="metric-card">
+            <span>AI Complete</span>
+            <strong>{{ stats.ai_complete or 0 }}</strong>
+        </div>
+        <div class="metric-card">
+            <span>Closed</span>
+            <strong>{{ stats.closed_cases or 0 }}</strong>
+        </div>
+        <div class="metric-card">
+            <span>Avg Confidence</span>
+            <strong>{% if stats.avg_confidence %}{{ "%.1f"|format(stats.avg_confidence) }}%{% else %}-{% endif %}</strong>
         </div>
     </div>
 
     <div class="panel">
+        <form method="get" class="case-filter-form">
+            <label>Search
+                <input name="q" value="{{ filters.q or '' }}" placeholder="case, customer, address, claim, source">
+            </label>
+            <label>Status
+                <select name="status">
+                    <option value="">All statuses</option>
+                    {% for status in ["New", "Awaiting Photos", "AI Complete", "Inspection Needed", "Repair Scheduled", "Closed"] %}
+                    <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Mode
+                <select name="mode">
+                    <option value="">All modes</option>
+                    {% for mode in ["consumer", "contractor", "insurance"] %}
+                    <option value="{{ mode }}" {% if filters.mode == mode %}selected{% endif %}>{{ mode|title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button class="primary-btn" type="submit">Filter</button>
+            <a class="secondary-btn" href="{{ url_for('admin_cases') }}">Clear</a>
+        </form>
+    </div>
+
+    <div class="panel">
+        <h2>Status Breakdown</h2>
+        <div class="status-pill-row">
+            {% for row in status_counts %}
+            <span>{{ row.status }} <strong>{{ row.count }}</strong></span>
+            {% else %}
+            <span>No cases yet</span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="panel table-panel">
         <table>
             <thead>
                 <tr>
                     <th>Case</th>
+                    <th>Customer / Property</th>
+                    <th>Status</th>
+                    <th>Priority</th>
                     <th>Mode</th>
-                    <th>Symptom</th>
                     <th>Source</th>
                     <th>Confidence</th>
+                    <th>Claim</th>
                     <th>Created</th>
                 </tr>
             </thead>
@@ -24,14 +89,20 @@
                 {% for c in cases %}
                 <tr>
                     <td><a href="{{ url_for('results', investigation_id=c.id) }}">{{ c.case_number }}</a></td>
-                    <td>{{ c.mode }}</td>
-                    <td>{{ c.symptom_type or "-" }}</td>
+                    <td>
+                        <strong>{{ c.customer_name or "-" }}</strong><br>
+                        <span class="muted">{{ c.property_name or c.property_address or "No property entered" }}</span>
+                    </td>
+                    <td><span class="status-badge">{{ c.status or "New" }}</span></td>
+                    <td>{{ c.priority or "Normal" }}</td>
+                    <td>{{ c.mode|title }}</td>
                     <td>{{ c.ai_source or "Pending" }}</td>
-                    <td>{{ c.ai_confidence or "-" }}</td>
+                    <td>{% if c.ai_confidence %}{{ c.ai_confidence }}%{% else %}-{% endif %}</td>
+                    <td>{{ c.claim_number or "-" }}</td>
                     <td>{{ c.created_at }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6">No cases yet.</td></tr>
+                <tr><td colspan="9">No cases match your filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

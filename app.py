@@ -6,9 +6,12 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from xml.sax.saxutils import escape
 
 from services.diagnosis import run_leak_investigation
 
@@ -44,6 +47,50 @@ def ensure_column(conn, table, column, column_type):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
+def clean_text(value, default=""):
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def pdf_text(value, default="Not provided"):
+    value = clean_text(value, default)
+    return escape(value.replace("\n", " "))
+
+
+def build_case_filters(args):
+    clauses = []
+    params = []
+
+    status = clean_text(args.get("status"))
+    mode = clean_text(args.get("mode"))
+    q = clean_text(args.get("q"))
+
+    if status:
+        clauses.append("COALESCE(status, 'New') = ?")
+        params.append(status)
+
+    if mode:
+        clauses.append("mode = ?")
+        params.append(mode)
+
+    if q:
+        like = f"%{q}%"
+        clauses.append("""(
+            case_number LIKE ? OR
+            customer_name LIKE ? OR
+            customer_phone LIKE ? OR
+            customer_email LIKE ? OR
+            property_address LIKE ? OR
+            claim_number LIKE ? OR
+            ai_source LIKE ?
+        )""")
+        params.extend([like, like, like, like, like, like, like])
+
+    where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
+    return where_sql, params, {"status": status, "mode": mode, "q": q}
+
+
 def init_db():
     conn = get_db()
     conn.executescript("""
@@ -51,6 +98,25 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         case_number TEXT UNIQUE,
         mode TEXT NOT NULL,
+        status TEXT DEFAULT 'New',
+        priority TEXT DEFAULT 'Normal',
+        assigned_to TEXT,
+
+        customer_name TEXT,
+        customer_phone TEXT,
+        customer_email TEXT,
+        customer_notes TEXT,
+        property_name TEXT,
+        insurance_company TEXT,
+        claim_number TEXT,
+        adjuster_name TEXT,
+        adjuster_phone TEXT,
+        adjuster_email TEXT,
+        contractor_company TEXT,
+        contractor_license TEXT,
+        contractor_phone TEXT,
+        contractor_email TEXT,
+        report_notes TEXT,
 
         property_type TEXT,
         symptom_type TEXT,
@@ -145,6 +211,24 @@ def init_db():
     """)
 
     migrations = {
+        "status": "TEXT DEFAULT 'New'",
+        "priority": "TEXT DEFAULT 'Normal'",
+        "assigned_to": "TEXT",
+        "customer_name": "TEXT",
+        "customer_phone": "TEXT",
+        "customer_email": "TEXT",
+        "customer_notes": "TEXT",
+        "property_name": "TEXT",
+        "insurance_company": "TEXT",
+        "claim_number": "TEXT",
+        "adjuster_name": "TEXT",
+        "adjuster_phone": "TEXT",
+        "adjuster_email": "TEXT",
+        "contractor_company": "TEXT",
+        "contractor_license": "TEXT",
+        "contractor_phone": "TEXT",
+        "contractor_email": "TEXT",
+        "report_notes": "TEXT",
         "property_address": "TEXT",
         "property_lat": "REAL",
         "property_lon": "REAL",
@@ -215,8 +299,8 @@ def start_investigation():
 
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO investigations (case_number, mode) VALUES (?, ?)",
-        (case_number, mode)
+        "INSERT INTO investigations (case_number, mode, status, priority) VALUES (?, ?, ?, ?)",
+        (case_number, mode, "New", "Normal")
     )
     investigation_id = cur.lastrowid
     conn.commit()
@@ -232,6 +316,24 @@ def investigation_wizard(investigation_id):
 
     if request.method == "POST":
         fields = {
+            "status": request.form.get("status") or "AI Complete",
+            "priority": request.form.get("priority") or "Normal",
+            "assigned_to": request.form.get("assigned_to"),
+            "customer_name": request.form.get("customer_name"),
+            "customer_phone": request.form.get("customer_phone"),
+            "customer_email": request.form.get("customer_email"),
+            "customer_notes": request.form.get("customer_notes"),
+            "property_name": request.form.get("property_name"),
+            "insurance_company": request.form.get("insurance_company"),
+            "claim_number": request.form.get("claim_number"),
+            "adjuster_name": request.form.get("adjuster_name"),
+            "adjuster_phone": request.form.get("adjuster_phone"),
+            "adjuster_email": request.form.get("adjuster_email"),
+            "contractor_company": request.form.get("contractor_company"),
+            "contractor_license": request.form.get("contractor_license"),
+            "contractor_phone": request.form.get("contractor_phone"),
+            "contractor_email": request.form.get("contractor_email"),
+            "report_notes": request.form.get("report_notes"),
             "property_type": request.form.get("property_type"),
             "symptom_type": request.form.get("symptom_type"),
             "symptom_location": request.form.get("symptom_location"),
@@ -254,7 +356,25 @@ def investigation_wizard(investigation_id):
 
         conn.execute("""
             UPDATE investigations
-            SET property_type=?,
+            SET status=?,
+                priority=?,
+                assigned_to=?,
+                customer_name=?,
+                customer_phone=?,
+                customer_email=?,
+                customer_notes=?,
+                property_name=?,
+                insurance_company=?,
+                claim_number=?,
+                adjuster_name=?,
+                adjuster_phone=?,
+                adjuster_email=?,
+                contractor_company=?,
+                contractor_license=?,
+                contractor_phone=?,
+                contractor_email=?,
+                report_notes=?,
+                property_type=?,
                 symptom_type=?,
                 symptom_location=?,
                 leak_timing=?,
@@ -271,6 +391,24 @@ def investigation_wizard(investigation_id):
                 description=?
             WHERE id=?
         """, (
+            fields["status"],
+            fields["priority"],
+            fields["assigned_to"],
+            fields["customer_name"],
+            fields["customer_phone"],
+            fields["customer_email"],
+            fields["customer_notes"],
+            fields["property_name"],
+            fields["insurance_company"],
+            fields["claim_number"],
+            fields["adjuster_name"],
+            fields["adjuster_phone"],
+            fields["adjuster_email"],
+            fields["contractor_company"],
+            fields["contractor_license"],
+            fields["contractor_phone"],
+            fields["contractor_email"],
+            fields["report_notes"],
             fields["property_type"],
             fields["symptom_type"],
             fields["symptom_location"],
@@ -371,7 +509,8 @@ def investigation_wizard(investigation_id):
                 ai_repair_recommendation=?,
                 ai_cost_range=?,
                 ai_heatmap_json=?,
-                ai_callouts_json=?
+                ai_callouts_json=?,
+                status='AI Complete'
             WHERE id=?
         """, (
             diagnosis.get("probable_source"),
@@ -427,6 +566,11 @@ def results(investigation_id):
         (investigation_id,)
     ).fetchall()
 
+    feedback_record = conn.execute(
+        "SELECT * FROM investigation_feedback WHERE investigation_id=? ORDER BY created_at DESC LIMIT 1",
+        (investigation_id,)
+    ).fetchone()
+
     heatmap_zones = []
     callout_markers = []
 
@@ -448,6 +592,7 @@ def results(investigation_id):
         "results.html",
         investigation=investigation,
         photos=photos,
+        feedback_record=feedback_record,
         heatmap_zones=heatmap_zones,
         callout_markers=callout_markers
     )
@@ -615,99 +760,228 @@ def save_calibration_point(investigation_id):
     return jsonify({"success": True})
 
 
-@app.route("/report/<int:investigation_id>/pdf")
-def pdf_report(investigation_id):
-    init_db()
 
+def get_case_bundle(investigation_id):
     conn = get_db()
-
     investigation = conn.execute(
         "SELECT * FROM investigations WHERE id=?",
         (investigation_id,)
     ).fetchone()
 
     photos = conn.execute(
-        "SELECT * FROM investigation_photos WHERE investigation_id=?",
+        "SELECT * FROM investigation_photos WHERE investigation_id=? ORDER BY created_at ASC",
         (investigation_id,)
     ).fetchall()
 
+    feedback = conn.execute(
+        "SELECT * FROM investigation_feedback WHERE investigation_id=? ORDER BY created_at DESC LIMIT 1",
+        (investigation_id,)
+    ).fetchone()
+
     conn.close()
+    return investigation, photos, feedback
+
+
+def make_pdf_report(investigation, photos, feedback=None, report_type="professional"):
+    report_dir = os.path.join(BASE_DIR, "generated_reports")
+    os.makedirs(report_dir, exist_ok=True)
+
+    suffix = "insurance" if report_type == "insurance" else "professional"
+    pdf_path = os.path.join(report_dir, f"{investigation['case_number']}_{suffix}.pdf")
+
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=letter,
+        rightMargin=42,
+        leftMargin=42,
+        topMargin=42,
+        bottomMargin=42
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="SmallMuted",
+        parent=styles["BodyText"],
+        fontSize=8,
+        textColor=colors.HexColor("#536273"),
+        leading=10
+    ))
+    styles.add(ParagraphStyle(
+        name="SectionTitle",
+        parent=styles["Heading2"],
+        fontSize=14,
+        spaceBefore=14,
+        spaceAfter=7,
+        textColor=colors.HexColor("#0f2537")
+    ))
+
+    story = []
+    title = "LeakTrace AI Carrier Evidence Report" if report_type == "insurance" else "LeakTrace AI Water Intrusion Report"
+
+    story.append(Paragraph(title, styles["Title"]))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        "AI-assisted field investigation summary. Findings should be verified by a qualified onsite professional before final repair authorization.",
+        styles["SmallMuted"]
+    ))
+    story.append(Spacer(1, 14))
+
+    overview_rows = [
+        ["Case Number", pdf_text(investigation["case_number"])],
+        ["Status / Priority", f"{pdf_text(investigation['status'], 'New')} / {pdf_text(investigation['priority'], 'Normal')}"],
+        ["Customer", pdf_text(investigation["customer_name"])],
+        ["Property", pdf_text(investigation["property_name"] or investigation["property_address"])],
+        ["Address", pdf_text(investigation["property_address"])],
+        ["Mode", pdf_text(investigation["mode"].title() if investigation["mode"] else "")],
+        ["Created", pdf_text(investigation["created_at"])],
+    ]
+
+    if report_type == "insurance":
+        overview_rows.extend([
+            ["Insurance Company", pdf_text(investigation["insurance_company"])],
+            ["Claim Number", pdf_text(investigation["claim_number"])],
+            ["Adjuster", pdf_text(investigation["adjuster_name"])],
+        ])
+    else:
+        overview_rows.extend([
+            ["Contractor", pdf_text(investigation["contractor_company"])],
+            ["License", pdf_text(investigation["contractor_license"])],
+        ])
+
+    table = Table(overview_rows, colWidths=[1.75 * inch, 4.85 * inch])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f3f8")),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0f2537")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#c7d2dc")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story.append(table)
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Executive Summary", styles["SectionTitle"]))
+    story.append(Paragraph(pdf_text(investigation["ai_summary"], "No summary available."), styles["BodyText"]))
+
+    story.append(Paragraph("Primary Finding", styles["SectionTitle"]))
+    story.append(Paragraph(f"<b>Most Probable Source:</b> {pdf_text(investigation['ai_source'], 'Pending analysis')}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Probable Cause:</b> {pdf_text(investigation['ai_cause'], 'Pending analysis')}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Confidence:</b> {pdf_text(investigation['ai_confidence'], 'N/A')}%", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Secondary Possibility:</b> {pdf_text(investigation['ai_secondary_source'])}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Urgency:</b> {pdf_text(investigation['ai_urgency'])}", styles["BodyText"]))
+
+    story.append(Paragraph("Observed Conditions", styles["SectionTitle"]))
+    condition_rows = [
+        ["Property Type", pdf_text(investigation["property_type"])],
+        ["Symptom", pdf_text(investigation["symptom_type"])],
+        ["Symptom Location", pdf_text(investigation["symptom_location"])],
+        ["Leak Timing", pdf_text(investigation["leak_timing"])],
+        ["Storm Context", pdf_text(investigation["storm_context"])],
+        ["Roof Type / Age", f"{pdf_text(investigation['roof_type'])} / {pdf_text(investigation['roof_age'])}"],
+        ["Known Features", pdf_text(investigation["known_features"])],
+    ]
+    ctable = Table(condition_rows, colWidths=[1.75 * inch, 4.85 * inch])
+    ctable.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d5dde5")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f4f8fb")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(ctable)
+
+    story.append(Paragraph("Weather Correlation", styles["SectionTitle"]))
+    story.append(Paragraph(f"<b>Summary:</b> {pdf_text(investigation['weather_summary'], 'No weather data available')}", styles["BodyText"]))
+    story.append(Paragraph(f"<b>Rainfall:</b> {pdf_text(investigation['weather_rainfall'], 'N/A')}  <b>Wind:</b> {pdf_text(investigation['weather_wind'], 'N/A')}", styles["BodyText"]))
+
+    story.append(Paragraph("Recommended Confirmation", styles["SectionTitle"]))
+    story.append(Paragraph(pdf_text(investigation["ai_confirmation_steps"], "No confirmation steps available."), styles["BodyText"]))
+
+    story.append(Paragraph("Repair Direction", styles["SectionTitle"]))
+    story.append(Paragraph(pdf_text(investigation["ai_repair_recommendation"], "No repair recommendation available."), styles["BodyText"]))
+    story.append(Paragraph(f"<b>Preliminary Cost Range:</b> {pdf_text(investigation['ai_cost_range'], 'Unknown')}", styles["BodyText"]))
+
+    if report_type == "insurance":
+        story.append(Paragraph("Carrier Documentation Notes", styles["SectionTitle"]))
+        story.append(Paragraph(
+            "This report separates observed symptoms, probable cause, weather context, and repair direction for claim documentation. It does not determine coverage.",
+            styles["BodyText"]
+        ))
+
+    if investigation["report_notes"]:
+        story.append(Paragraph("Contractor / Report Notes", styles["SectionTitle"]))
+        story.append(Paragraph(pdf_text(investigation["report_notes"]), styles["BodyText"]))
+
+    if feedback:
+        story.append(Paragraph("Field Verification", styles["SectionTitle"]))
+        story.append(Paragraph(f"<b>AI Correct:</b> {pdf_text(feedback['was_correct'])}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Actual Source:</b> {pdf_text(feedback['actual_source'])}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Actual Repair:</b> {pdf_text(feedback['actual_repair'])}", styles["BodyText"]))
+        story.append(Paragraph(f"<b>Repair Cost:</b> {pdf_text(feedback['repair_cost'])}", styles["BodyText"]))
+        story.append(Paragraph(pdf_text(feedback["reviewer_notes"], ""), styles["BodyText"]))
+
+    story.append(PageBreak())
+    story.append(Paragraph("Evidence Index", styles["SectionTitle"]))
+    story.append(Paragraph(f"Uploaded evidence count: {len(photos)} photo(s).", styles["BodyText"]))
+    for idx, photo in enumerate(photos, start=1):
+        story.append(Paragraph(
+            f"<b>{idx}. {pdf_text(photo['photo_stage'].replace('_', ' ').title())}</b> — {pdf_text(photo['original_filename'])}",
+            styles["BodyText"]
+        ))
+
+    story.append(Spacer(1, 18))
+    story.append(Paragraph("Generated by LeakTrace AI", styles["SmallMuted"]))
+
+    doc.build(story)
+    return pdf_path
+
+
+@app.route("/report/<int:investigation_id>/pdf")
+def pdf_report(investigation_id):
+    init_db()
+    investigation, photos, feedback = get_case_bundle(investigation_id)
 
     if investigation is None:
         flash("Case not found.", "warning")
         return redirect(url_for("index"))
 
-    report_dir = os.path.join(BASE_DIR, "generated_reports")
-    os.makedirs(report_dir, exist_ok=True)
+    pdf_path = make_pdf_report(investigation, photos, feedback, report_type="professional")
+    return send_file(pdf_path, as_attachment=True)
 
-    pdf_path = os.path.join(
-        report_dir,
-        f"{investigation['case_number']}.pdf"
-    )
 
-    doc = SimpleDocTemplate(
-        pdf_path,
-        pagesize=letter,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40
-    )
+@app.route("/report/<int:investigation_id>/insurance-pdf")
+def insurance_pdf_report(investigation_id):
+    init_db()
+    investigation, photos, feedback = get_case_bundle(investigation_id)
 
-    styles = getSampleStyleSheet()
-    story = []
+    if investigation is None:
+        flash("Case not found.", "warning")
+        return redirect(url_for("index"))
 
-    story.append(Paragraph("LeakTrace AI Investigation Report", styles["Title"]))
-    story.append(Spacer(1, 18))
+    pdf_path = make_pdf_report(investigation, photos, feedback, report_type="insurance")
+    return send_file(pdf_path, as_attachment=True)
 
-    story.append(Paragraph(f"<b>Case Number:</b> {investigation['case_number']}", styles["BodyText"]))
-    story.append(Paragraph(f"<b>Property Address:</b> {investigation['property_address'] or 'Not Provided'}", styles["BodyText"]))
-    story.append(Paragraph(f"<b>Roof Type:</b> {investigation['roof_type'] or 'Unknown'}", styles["BodyText"]))
-    story.append(Paragraph(f"<b>AI Confidence:</b> {investigation['ai_confidence'] or 'N/A'}%", styles["BodyText"]))
 
-    story.append(Spacer(1, 14))
+@app.route("/case/<int:investigation_id>/update", methods=["POST"])
+def update_case(investigation_id):
+    init_db()
+    update_fields = [
+        "status", "priority", "assigned_to", "customer_name", "customer_phone", "customer_email",
+        "customer_notes", "property_name", "property_address", "insurance_company", "claim_number",
+        "adjuster_name", "adjuster_phone", "adjuster_email", "contractor_company", "contractor_license",
+        "contractor_phone", "contractor_email", "report_notes"
+    ]
 
-    story.append(Paragraph("<b>Most Probable Leak Source</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["ai_source"] or "Unknown", styles["BodyText"]))
+    values = [request.form.get(field) for field in update_fields]
+    assignments = ", ".join([f"{field}=?" for field in update_fields])
 
-    story.append(Spacer(1, 8))
+    conn = get_db()
+    conn.execute(f"UPDATE investigations SET {assignments} WHERE id=?", values + [investigation_id])
+    conn.commit()
+    conn.close()
 
-    story.append(Paragraph("<b>AI Diagnosis</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["ai_cause"] or "", styles["BodyText"]))
-
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph("<b>Repair Recommendation</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["ai_repair_recommendation"] or "", styles["BodyText"]))
-
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph("<b>Confirmation Steps</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["ai_confirmation_steps"] or "", styles["BodyText"]))
-
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph("<b>Estimated Repair Range</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["ai_cost_range"] or "Unknown", styles["BodyText"]))
-
-    story.append(Spacer(1, 18))
-
-    story.append(Paragraph("<b>Weather Correlation</b>", styles["Heading2"]))
-    story.append(Paragraph(investigation["weather_summary"] or "No weather data", styles["BodyText"]))
-
-    story.append(Spacer(1, 18))
-
-    story.append(Paragraph(f"<b>Uploaded Evidence Count:</b> {len(photos)} photos", styles["BodyText"]))
-
-    story.append(Spacer(1, 24))
-    story.append(Paragraph("Generated by LeakTrace AI", styles["Italic"]))
-
-    doc.build(story)
-
-    return send_file(
-        pdf_path,
-        as_attachment=True
-    )
+    flash("Case file updated.", "success")
+    return redirect(url_for("results", investigation_id=investigation_id))
 
 
 @app.route("/admin/cases")
@@ -715,13 +989,39 @@ def admin_cases():
     init_db()
     conn = get_db()
 
+    where_sql, params, filters = build_case_filters(request.args)
+
     cases = conn.execute(
-        "SELECT * FROM investigations ORDER BY created_at DESC"
+        f"SELECT * FROM investigations {where_sql} ORDER BY created_at DESC",
+        params
     ).fetchall()
+
+    stats = conn.execute("""
+        SELECT
+            COUNT(*) AS total_cases,
+            SUM(CASE WHEN COALESCE(status, 'New') IN ('New', 'Awaiting Photos', 'Inspection Needed', 'Repair Scheduled') THEN 1 ELSE 0 END) AS open_cases,
+            SUM(CASE WHEN COALESCE(status, 'New') = 'AI Complete' THEN 1 ELSE 0 END) AS ai_complete,
+            SUM(CASE WHEN COALESCE(status, 'New') = 'Closed' THEN 1 ELSE 0 END) AS closed_cases,
+            AVG(CASE WHEN ai_confidence IS NOT NULL THEN ai_confidence END) AS avg_confidence
+        FROM investigations
+    """).fetchone()
+
+    status_counts = conn.execute("""
+        SELECT COALESCE(status, 'New') AS status, COUNT(*) AS count
+        FROM investigations
+        GROUP BY COALESCE(status, 'New')
+        ORDER BY count DESC
+    """).fetchall()
 
     conn.close()
 
-    return render_template("admin_cases.html", cases=cases)
+    return render_template(
+        "admin_cases.html",
+        cases=cases,
+        stats=stats,
+        status_counts=status_counts,
+        filters=filters
+    )
 
 
 if __name__ == "__main__":

@@ -18,20 +18,119 @@
             </a>
         </p>
 
-        <p style="margin-top:12px;">
+        <div class="action-row">
             <a class="primary-btn"
                href="{{ url_for('pdf_report', investigation_id=investigation.id) }}">
-                Download Professional PDF Report
+                Professional PDF
             </a>
-        </p>
 
-        <p>{{ investigation.mode|title }} Mode</p>
+            <a class="secondary-btn"
+               href="{{ url_for('insurance_pdf_report', investigation_id=investigation.id) }}">
+                Insurance PDF
+            </a>
+        </div>
+
+        <p>{{ investigation.mode|title }} Mode · {{ investigation.status or 'New' }} · {{ investigation.priority or 'Normal' }} Priority</p>
     </div>
 
     <div class="confidence-ring">
         <strong>{{ investigation.ai_confidence }}%</strong>
         <span>Confidence</span>
     </div>
+</div>
+
+<div class="panel">
+    <h2>Case File</h2>
+    <form method="post" action="{{ url_for('update_case', investigation_id=investigation.id) }}" class="case-file-form">
+        <div class="grid-3">
+            <label>Status
+                <select name="status">
+                    {% for status in ["New", "Awaiting Photos", "AI Complete", "Inspection Needed", "Repair Scheduled", "Closed"] %}
+                    <option value="{{ status }}" {% if investigation.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>Priority
+                <select name="priority">
+                    {% for priority in ["Low", "Normal", "High", "Emergency"] %}
+                    <option value="{{ priority }}" {% if investigation.priority == priority %}selected{% endif %}>{{ priority }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>Assigned To
+                <input name="assigned_to" value="{{ investigation.assigned_to or '' }}">
+            </label>
+        </div>
+
+        <div class="grid-3">
+            <label>Customer Name
+                <input name="customer_name" value="{{ investigation.customer_name or '' }}">
+            </label>
+            <label>Customer Phone
+                <input name="customer_phone" value="{{ investigation.customer_phone or '' }}">
+            </label>
+            <label>Customer Email
+                <input name="customer_email" value="{{ investigation.customer_email or '' }}">
+            </label>
+        </div>
+
+        <div class="grid-2">
+            <label>Property / Job Name
+                <input name="property_name" value="{{ investigation.property_name or '' }}">
+            </label>
+            <label>Property Address
+                <input name="property_address" value="{{ investigation.property_address or '' }}">
+            </label>
+        </div>
+
+        <div class="grid-3">
+            <label>Insurance Company
+                <input name="insurance_company" value="{{ investigation.insurance_company or '' }}">
+            </label>
+            <label>Claim Number
+                <input name="claim_number" value="{{ investigation.claim_number or '' }}">
+            </label>
+            <label>Adjuster Name
+                <input name="adjuster_name" value="{{ investigation.adjuster_name or '' }}">
+            </label>
+        </div>
+
+        <div class="grid-3">
+            <label>Adjuster Phone
+                <input name="adjuster_phone" value="{{ investigation.adjuster_phone or '' }}">
+            </label>
+            <label>Adjuster Email
+                <input name="adjuster_email" value="{{ investigation.adjuster_email or '' }}">
+            </label>
+            <label>Contractor Company
+                <input name="contractor_company" value="{{ investigation.contractor_company or '' }}">
+            </label>
+        </div>
+
+        <div class="grid-3">
+            <label>Contractor License
+                <input name="contractor_license" value="{{ investigation.contractor_license or '' }}">
+            </label>
+            <label>Contractor Phone
+                <input name="contractor_phone" value="{{ investigation.contractor_phone or '' }}">
+            </label>
+            <label>Contractor Email
+                <input name="contractor_email" value="{{ investigation.contractor_email or '' }}">
+            </label>
+        </div>
+
+        <label>Customer / Internal Notes
+            <textarea name="customer_notes" rows="3">{{ investigation.customer_notes or '' }}</textarea>
+        </label>
+
+        <label>Report Notes
+            <textarea name="report_notes" rows="3">{{ investigation.report_notes or '' }}</textarea>
+        </label>
+
+        <button class="primary-btn" type="submit">Save Case File</button>
+    </form>
 </div>
 
 <div class="results-grid">
@@ -296,6 +395,17 @@
 
 <div class="panel">
     <h2>Field Confirmation / Feedback</h2>
+
+    {% if feedback_record %}
+    <div class="verification-card">
+        <div class="eyebrow">Latest Field Verification</div>
+        <p><strong>AI Correct:</strong> {{ feedback_record.was_correct or 'Unknown' }}</p>
+        <p><strong>Actual Source:</strong> {{ feedback_record.actual_source or '-' }}</p>
+        <p><strong>Actual Repair:</strong> {{ feedback_record.actual_repair or '-' }}</p>
+        <p><strong>Repair Cost:</strong> {{ feedback_record.repair_cost or '-' }}</p>
+        <p class="muted">{{ feedback_record.reviewer_notes or '' }}</p>
+    </div>
+    {% endif %}
 
     <form method="post"
           action="{{ url_for('feedback', investigation_id=investigation.id) }}"

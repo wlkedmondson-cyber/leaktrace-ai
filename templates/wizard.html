@@ -19,6 +19,91 @@
     <form method="post" enctype="multipart/form-data" class="investigation-form">
 
         <div class="panel">
+            <h2>Case / Customer File</h2>
+            <p class="muted">This turns the investigation into a real contractor case instead of a one-off diagnosis.</p>
+
+            <div class="grid-2">
+                <label>Status
+                    <select name="status">
+                        {% for status in ["New", "Awaiting Photos", "AI Complete", "Inspection Needed", "Repair Scheduled", "Closed"] %}
+                        <option value="{{ status }}" {% if investigation.status == status %}selected{% endif %}>{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>Priority
+                    <select name="priority">
+                        {% for priority in ["Low", "Normal", "High", "Emergency"] %}
+                        <option value="{{ priority }}" {% if investigation.priority == priority %}selected{% endif %}>{{ priority }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label>Customer Name
+                    <input name="customer_name" value="{{ investigation.customer_name or '' }}" placeholder="Homeowner / property contact">
+                </label>
+
+                <label>Customer Phone
+                    <input name="customer_phone" value="{{ investigation.customer_phone or '' }}" placeholder="Phone number">
+                </label>
+
+                <label>Customer Email
+                    <input name="customer_email" value="{{ investigation.customer_email or '' }}" placeholder="Email address">
+                </label>
+
+                <label>Property / Job Name
+                    <input name="property_name" value="{{ investigation.property_name or '' }}" placeholder="Johnson Residence, Smith Church, Unit B, etc.">
+                </label>
+
+                <label>Assigned To
+                    <input name="assigned_to" value="{{ investigation.assigned_to or '' }}" placeholder="Inspector / technician">
+                </label>
+
+                <label>Contractor Company
+                    <input name="contractor_company" value="{{ investigation.contractor_company or '' }}" placeholder="Your company name">
+                </label>
+
+                <label>Contractor License #
+                    <input name="contractor_license" value="{{ investigation.contractor_license or '' }}" placeholder="Optional license number">
+                </label>
+
+                <label>Contractor Phone
+                    <input name="contractor_phone" value="{{ investigation.contractor_phone or '' }}">
+                </label>
+
+                <label>Contractor Email
+                    <input name="contractor_email" value="{{ investigation.contractor_email or '' }}">
+                </label>
+            </div>
+
+            <div class="grid-2" style="margin-top:18px;">
+                <label>Insurance Company
+                    <input name="insurance_company" value="{{ investigation.insurance_company or '' }}" placeholder="Carrier name">
+                </label>
+
+                <label>Claim Number
+                    <input name="claim_number" value="{{ investigation.claim_number or '' }}" placeholder="Claim #">
+                </label>
+
+                <label>Adjuster Name
+                    <input name="adjuster_name" value="{{ investigation.adjuster_name or '' }}">
+                </label>
+
+                <label>Adjuster Phone
+                    <input name="adjuster_phone" value="{{ investigation.adjuster_phone or '' }}">
+                </label>
+
+                <label>Adjuster Email
+                    <input name="adjuster_email" value="{{ investigation.adjuster_email or '' }}">
+                </label>
+            </div>
+
+            <label style="margin-top:18px;">Customer / Internal Notes
+                <textarea name="customer_notes" rows="3" placeholder="Scheduling notes, access instructions, gate code, tenant contact, etc.">{{ investigation.customer_notes or '' }}</textarea>
+            </label>
+        </div>
+
+        <div class="panel">
             <h2>Tell us what happened.</h2>
 
             <div class="grid-2">
@@ -141,7 +226,11 @@
             <h2>Investigation Notes</h2>
 
             <label>Describe anything else important
-                <textarea name="description" rows="4" placeholder="Example: stain is directly below a vent pipe, only leaks when rain blows from the west, previous repair was done last year..."></textarea>
+                <textarea name="description" rows="4" placeholder="Example: stain is directly below a vent pipe, only leaks when rain blows from the west, previous repair was done last year...">{{ investigation.description or '' }}</textarea>
+            </label>
+
+            <label style="margin-top:18px;">Report Notes
+                <textarea name="report_notes" rows="3" placeholder="Optional notes that should print on reports.">{{ investigation.report_notes or '' }}</textarea>
             </label>
         </div>
 
