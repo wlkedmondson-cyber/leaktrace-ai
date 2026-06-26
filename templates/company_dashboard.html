@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+  <div class="case-header">
+    <div>
+      <div class="eyebrow">Company Dashboard</div>
+      <h1>{{ summary.company.name }}</h1>
+      <p class="muted">Plan: {{ summary.plan.name }} · {{ summary.month_key }}</p>
+    </div>
+    <a class="primary-btn" href="/">Start New Case</a>
+  </div>
+
+  <div class="metric-grid">
+    <div class="metric-card"><span>Monthly Investigations</span><strong>{% if summary.included is none %}{{ summary.used }} / Unlimited{% else %}{{ summary.used }} / {{ summary.included }}{% endif %}</strong></div>
+    <div class="metric-card"><span>Included Remaining</span><strong>{% if summary.remaining_included is none %}Unlimited{% else %}{{ summary.remaining_included }}{% endif %}</strong></div>
+    <div class="metric-card"><span>Purchased Credits</span><strong>{{ summary.purchased_remaining }}</strong></div>
+    <div class="metric-card"><span>Users</span><strong>{% if summary.plan.max_users is none %}{{ summary.active_users }} / Unlimited{% else %}{{ summary.active_users }} / {{ summary.plan.max_users }}{% endif %}</strong></div>
+    <div class="metric-card"><span>Open Cases</span><strong>{{ open_cases }}</strong></div>
+  </div>
+
+  <div class="panel">
+    <h2>Commercial Controls</h2>
+    <div class="action-row">
+      <a class="primary-btn" href="{{ url_for('billing') }}">Billing & Credits</a>
+      <a class="secondary-btn" href="{{ url_for('team') }}">Manage Team</a>
+      <a class="secondary-btn" href="{{ url_for('crm_estimates') }}">CRM Estimates</a>
+    </div>
+  </div>
+
+  <div class="panel table-panel">
+    <h2>Recent Cases</h2>
+    <table>
+      <thead><tr><th>Case</th><th>Customer</th><th>Status</th><th>AI Runs</th><th>Created</th></tr></thead>
+      <tbody>
+      {% for c in recent_cases %}
+      <tr><td><a href="{{ url_for('results', investigation_id=c.id) }}">{{ c.case_number }}</a></td><td>{{ c.customer_name or c.property_name or '-' }}</td><td>{{ c.status or 'New' }}</td><td>{{ c.completed_ai_count or 0 }}</td><td>{{ c.created_at }}</td></tr>
+      {% else %}<tr><td colspan="5">No cases yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+  <div class="case-header"><div><div class="eyebrow">Team Management</div><h1>Users</h1><p class="muted">Your plan allows {% if summary.plan.max_users is none %}unlimited users{% else %}{{ summary.plan.max_users }} active users{% endif %}.</p></div></div>
+  <div class="panel"><h2>Add User</h2><form method="post" class="grid-4"><label>Name<input name="name" required></label><label>Email<input name="email" type="email" required></label><label>Role<select name="role"><option value="owner">Owner</option><option value="manager">Manager</option><option value="technician">Technician</option><option value="office">Office/Admin</option></select></label><label>Temporary Password<input name="password" value="LeakTrace123!"></label><button class="primary-btn" type="submit">Create User</button></form></div>
+  <div class="panel table-panel"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>{% for u in users %}<tr><td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td><td>{{ 'Active' if u.is_active else 'Disabled' }}</td><td><form method="post" action="{{ url_for('toggle_user', user_id=u.id) }}"><button class="secondary-btn" type="submit">Toggle</button></form></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

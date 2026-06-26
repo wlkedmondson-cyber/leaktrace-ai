@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell print-estimate">
+  <div class="panel">
+    <div class="case-header"><div><div class="eyebrow">Owner Review Estimate #{{ estimate.id }}</div><h1>{{ estimate.customer_name or 'Customer Estimate' }}</h1><p>{{ estimate.property_address or '' }}</p></div><button onclick="window.print()" class="primary-btn">Print</button></div>
+    <table>
+      <tr><th>Estimate Type</th><td>{{ estimate.estimate_type }}</td></tr>
+      <tr><th>ZIP Pricing Area</th><td>{{ estimate.roof_zip }}</td></tr>
+      <tr><th>Roof Squares</th><td>{{ estimate.roof_squares }}</td></tr>
+      <tr><th>Material Tier</th><td>{{ estimate.material_tier }}</td></tr>
+      <tr><th>Material Cost</th><td>${{ '%.2f'|format(estimate.material_cost or 0) }}</td></tr>
+      <tr><th>Labor Cost</th><td>${{ '%.2f'|format(estimate.labor_cost or 0) }}</td></tr>
+      <tr><th>Overhead / Profit</th><td>${{ '%.2f'|format(estimate.overhead_profit or 0) }}</td></tr>
+      <tr><th>Total Review Estimate</th><td><strong>${{ '%.2f'|format(estimate.total_cost or 0) }}</strong></td></tr>
+    </table>
+    <h2>Notes</h2><p>{{ estimate.notes or 'No additional notes.' }}</p>
+    <p class="muted">This is a preliminary owner-review estimate. Final pricing should be confirmed after material selection, roof measurements, local supplier quotes, access, decking, code requirements, and company margin review.</p>
+  </div>
+</section>
+{% endblock %}

@@ -658,3 +658,11 @@ nav {
         grid-template-columns: 1fr;
     }
 }
+.auth-shell { min-height: 70vh; display:flex; align-items:center; justify-content:center; padding: 40px 18px; }
+.auth-card { width:min(520px, 100%); }
+.plan-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin:18px 0; }
+.plan-card .price { font-size:2rem; font-weight:800; margin:8px 0 16px; }
+.credit-card { border:1px solid rgba(15,37,55,.15); border-radius:16px; padding:18px; background:#fff; display:flex; flex-direction:column; gap:10px; }
+.grid-4 { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:14px; align-items:end; }
+.credit-confirm { border:2px solid rgba(36,113,163,.22); }
+@media print { .topbar, .flash-wrap, button, .primary-btn, .secondary-btn { display:none !important; } main { padding:0; } .panel { box-shadow:none; border:0; } }

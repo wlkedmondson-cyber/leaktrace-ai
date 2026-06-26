@@ -4,7 +4,9 @@ import sqlite3
 from datetime import datetime
 
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, session, g
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -30,6 +32,102 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+PLAN_RULES = {
+    "starter": {"name": "Starter", "price": 99, "max_users": 3, "monthly_credits": 25},
+    "pro": {"name": "Pro", "price": 199, "max_users": 6, "monthly_credits": 100},
+    "business": {"name": "Business", "price": 399, "max_users": None, "monthly_credits": None},
+}
+
+CREDIT_PACKS = {
+    "10": {"credits": 10, "price": 25},
+    "25": {"credits": 25, "price": 50},
+    "50": {"credits": 50, "price": 90},
+}
+
+PUBLIC_ENDPOINTS = {"login", "setup", "static"}
+
+def month_key():
+    return datetime.utcnow().strftime("%Y-%m")
+
+def current_user():
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    conn = get_db()
+    user = conn.execute("SELECT * FROM users WHERE id=? AND is_active=1", (uid,)).fetchone()
+    conn.close()
+    return user
+
+def login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+    return wrapper
+
+def owner_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = current_user()
+        if not user or user["role"] != "owner":
+            flash("Owner access is required.", "warning")
+            return redirect(url_for("company_dashboard"))
+        return fn(*args, **kwargs)
+    return wrapper
+
+def user_count(conn):
+    return conn.execute("SELECT COUNT(*) AS c FROM users WHERE is_active=1").fetchone()["c"]
+
+def company_row(conn, company_id):
+    return conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone()
+
+def plan_for(company):
+    return PLAN_RULES.get((company["plan_code"] or "starter"), PLAN_RULES["starter"])
+
+def usage_summary(conn, company_id):
+    company = company_row(conn, company_id)
+    plan = plan_for(company)
+    used = conn.execute("""
+        SELECT COUNT(*) AS c FROM usage_events
+        WHERE company_id=? AND event_type='completed_ai_investigation' AND month_key=?
+    """, (company_id, month_key())).fetchone()["c"]
+    purchased = conn.execute("""
+        SELECT COALESCE(SUM(credits_remaining), 0) AS c
+        FROM credit_purchases WHERE company_id=?
+    """, (company_id,)).fetchone()["c"]
+    active_users = conn.execute("SELECT COUNT(*) AS c FROM users WHERE company_id=? AND is_active=1", (company_id,)).fetchone()["c"]
+    included = plan["monthly_credits"]
+    remaining = None if included is None else max(included - used, 0)
+    allowed = True if included is None else (remaining > 0 or purchased > 0)
+    return {"company": company, "plan": plan, "used": used, "included": included, "remaining_included": remaining, "purchased_remaining": purchased, "active_users": active_users, "allowed": allowed, "month_key": month_key()}
+
+def consume_completed_investigation_credit(conn, company_id, user_id, investigation_id):
+    summary = usage_summary(conn, company_id)
+    if not summary["allowed"]:
+        return False, "No investigation credits available"
+    source = "included"
+    purchase_id = None
+    if summary["included"] is not None and summary["used"] >= summary["included"]:
+        pack = conn.execute("SELECT * FROM credit_purchases WHERE company_id=? AND credits_remaining>0 ORDER BY purchased_at ASC LIMIT 1", (company_id,)).fetchone()
+        if not pack:
+            return False, "No purchased investigation credits available"
+        purchase_id = pack["id"]
+        source = "purchased"
+        conn.execute("UPDATE credit_purchases SET credits_remaining=credits_remaining-1 WHERE id=?", (purchase_id,))
+    conn.execute("""
+        INSERT INTO usage_events (company_id, user_id, investigation_id, event_type, credit_source, credit_purchase_id, month_key)
+        VALUES (?, ?, ?, 'completed_ai_investigation', ?, ?, ?)
+    """, (company_id, user_id, investigation_id, source, purchase_id, month_key()))
+    return True, source
+
+def case_access(conn, investigation_id):
+    user = current_user()
+    if not user:
+        return None
+    return conn.execute("SELECT * FROM investigations WHERE id=? AND company_id=?", (investigation_id, user["company_id"])).fetchone()
 
 
 def get_db():
@@ -208,6 +306,81 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(investigation_id) REFERENCES investigations(id)
     );
+
+    CREATE TABLE IF NOT EXISTS companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        plan_code TEXT DEFAULT 'starter',
+        stripe_customer_id TEXT,
+        stripe_subscription_id TEXT,
+        billing_status TEXT DEFAULT 'manual',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'technician',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        user_id INTEGER,
+        investigation_id INTEGER,
+        event_type TEXT NOT NULL,
+        credit_source TEXT,
+        credit_purchase_id INTEGER,
+        month_key TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS credit_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        pack_code TEXT NOT NULL,
+        credits_purchased INTEGER NOT NULL,
+        credits_remaining INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        stripe_session_id TEXT,
+        status TEXT DEFAULT 'manual_pending_stripe',
+        purchased_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS investigation_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        investigation_id INTEGER NOT NULL,
+        version_number INTEGER NOT NULL,
+        generated_by_user_id INTEGER,
+        credit_used INTEGER DEFAULT 1,
+        ai_snapshot_json TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS repair_estimates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        investigation_id INTEGER,
+        customer_name TEXT,
+        property_address TEXT,
+        estimate_type TEXT DEFAULT 'repair',
+        roof_zip TEXT,
+        roof_squares REAL DEFAULT 0,
+        material_tier TEXT DEFAULT 'standard',
+        labor_rate REAL DEFAULT 85,
+        material_cost REAL DEFAULT 0,
+        labor_cost REAL DEFAULT 0,
+        overhead_profit REAL DEFAULT 0,
+        total_cost REAL DEFAULT 0,
+        notes TEXT,
+        status TEXT DEFAULT 'Draft',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
     """)
 
     migrations = {
@@ -272,6 +445,10 @@ def init_db():
 
         "ai_heatmap_json": "TEXT",
         "ai_callouts_json": "TEXT",
+        "company_id": "INTEGER",
+        "created_by_user_id": "INTEGER",
+        "completed_ai_count": "INTEGER DEFAULT 0",
+        "last_completed_ai_at": "TEXT",
     }
 
     for column, column_type in migrations.items():
@@ -285,12 +462,142 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+
+@app.before_request
+def require_login_for_app():
+    init_db()
+    g.user = current_user()
+    if request.endpoint in PUBLIC_ENDPOINTS or (request.endpoint or '').startswith('static'):
+        return None
+    conn = get_db()
+    has_users = user_count(conn) > 0
+    conn.close()
+    if not has_users:
+        return redirect(url_for('setup'))
+    if not g.user:
+        return redirect(url_for('login', next=request.path))
+    return None
+
+@app.route('/setup', methods=['GET', 'POST'])
+def setup():
+    init_db()
+    conn = get_db()
+    if user_count(conn) > 0:
+        conn.close()
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        company_name = request.form.get('company_name') or 'LeakTrace Company'
+        name = request.form.get('name') or 'Owner'
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
+        if not email or len(password) < 8:
+            flash('Enter an email and a password with at least 8 characters.', 'warning')
+            conn.close()
+            return render_template('setup.html')
+        cur = conn.execute("INSERT INTO companies (name, plan_code, billing_status) VALUES (?, 'business', 'trial')", (company_name,))
+        company_id = cur.lastrowid
+        conn.execute("INSERT INTO users (company_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, 'owner')", (company_id, name, email, generate_password_hash(password)))
+        conn.commit(); conn.close()
+        flash('Owner account created. Login to continue.', 'success')
+        return redirect(url_for('login'))
+    conn.close()
+    return render_template('setup.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    init_db()
+    conn = get_db()
+    if user_count(conn) == 0:
+        conn.close(); return redirect(url_for('setup'))
+    if request.method == 'POST':
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
+        user = conn.execute('SELECT * FROM users WHERE email=? AND is_active=1', (email,)).fetchone()
+        conn.close()
+        if user and check_password_hash(user['password_hash'], password):
+            session.clear(); session['user_id'] = user['id']; session['company_id'] = user['company_id']
+            return redirect(request.args.get('next') or url_for('company_dashboard'))
+        flash('Invalid login.', 'danger')
+        return render_template('login.html')
+    conn.close(); return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear(); flash('Logged out.', 'success'); return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def company_dashboard():
+    conn = get_db(); summary = usage_summary(conn, g.user['company_id'])
+    recent_cases = conn.execute('SELECT * FROM investigations WHERE company_id=? ORDER BY created_at DESC LIMIT 8', (g.user['company_id'],)).fetchall()
+    open_cases = conn.execute("SELECT COUNT(*) AS c FROM investigations WHERE company_id=? AND COALESCE(status,'New')!='Closed'", (g.user['company_id'],)).fetchone()['c']
+    conn.close(); return render_template('company_dashboard.html', summary=summary, recent_cases=recent_cases, open_cases=open_cases)
+
+@app.route('/team', methods=['GET', 'POST'])
+@login_required
+@owner_required
+def team():
+    conn = get_db(); summary = usage_summary(conn, g.user['company_id'])
+    if request.method == 'POST':
+        plan = summary['plan']
+        if plan['max_users'] is not None and summary['active_users'] >= plan['max_users']:
+            flash('Your plan has reached its user limit. Upgrade or disable a user first.', 'warning')
+        else:
+            try:
+                conn.execute('INSERT INTO users (company_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)', (g.user['company_id'], request.form.get('name') or 'Team Member', (request.form.get('email') or '').strip().lower(), generate_password_hash(request.form.get('password') or 'LeakTrace123!'), request.form.get('role') or 'technician'))
+                conn.commit(); flash('Team user created.', 'success')
+            except sqlite3.IntegrityError:
+                flash('That email already exists.', 'warning')
+        summary = usage_summary(conn, g.user['company_id'])
+    users = conn.execute('SELECT * FROM users WHERE company_id=? ORDER BY is_active DESC, created_at DESC', (g.user['company_id'],)).fetchall()
+    conn.close(); return render_template('team.html', users=users, summary=summary)
+
+@app.route('/team/<int:user_id>/toggle', methods=['POST'])
+@login_required
+@owner_required
+def toggle_user(user_id):
+    conn = get_db()
+    if user_id == g.user['id']:
+        flash('You cannot disable yourself.', 'warning')
+    else:
+        conn.execute('UPDATE users SET is_active=CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id=? AND company_id=?', (user_id, g.user['company_id']))
+        conn.commit(); flash('User status updated.', 'success')
+    conn.close(); return redirect(url_for('team'))
+
+@app.route('/billing', methods=['GET', 'POST'])
+@login_required
+@owner_required
+def billing():
+    conn = get_db()
+    if request.method == 'POST':
+        plan_code = request.form.get('plan_code')
+        if plan_code in PLAN_RULES:
+            conn.execute('UPDATE companies SET plan_code=?, billing_status=? WHERE id=?', (plan_code, 'manual', g.user['company_id']))
+            conn.commit(); flash('Plan updated. Stripe checkout can be wired to this same field.', 'success')
+    summary = usage_summary(conn, g.user['company_id'])
+    purchases = conn.execute('SELECT * FROM credit_purchases WHERE company_id=? ORDER BY purchased_at DESC', (g.user['company_id'],)).fetchall()
+    conn.close(); return render_template('billing.html', summary=summary, plans=PLAN_RULES, credit_packs=CREDIT_PACKS, purchases=purchases)
+
+@app.route('/billing/buy-credits', methods=['POST'])
+@login_required
+@owner_required
+def buy_credits():
+    pack_code = request.form.get('pack_code'); pack = CREDIT_PACKS.get(pack_code)
+    if not pack:
+        flash('Invalid credit pack.', 'warning'); return redirect(url_for('billing'))
+    conn = get_db()
+    conn.execute('INSERT INTO credit_purchases (company_id, pack_code, credits_purchased, credits_remaining, amount_cents) VALUES (?, ?, ?, ?, ?)', (g.user['company_id'], pack_code, pack['credits'], pack['credits'], pack['price']*100))
+    conn.commit(); conn.close(); flash('Credit pack added in manual mode. Stripe Checkout is the next hook.', 'success')
+    return redirect(url_for('billing'))
+
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
 
 @app.route("/investigate/start", methods=["POST"])
+@login_required
 def start_investigation():
     init_db()
 
@@ -299,8 +606,8 @@ def start_investigation():
 
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO investigations (case_number, mode, status, priority) VALUES (?, ?, ?, ?)",
-        (case_number, mode, "New", "Normal")
+        "INSERT INTO investigations (case_number, mode, status, priority, company_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (case_number, mode, "New", "Normal", g.user["company_id"], g.user["id"])
     )
     investigation_id = cur.lastrowid
     conn.commit()
@@ -310,9 +617,13 @@ def start_investigation():
 
 
 @app.route("/investigate/<int:investigation_id>", methods=["GET", "POST"])
+@login_required
 def investigation_wizard(investigation_id):
     init_db()
     conn = get_db()
+    existing = case_access(conn, investigation_id)
+    if existing is None:
+        conn.close(); flash("Case not found or access denied.", "warning"); return redirect(url_for("admin_cases"))
 
     if request.method == "POST":
         fields = {
@@ -427,6 +738,18 @@ def investigation_wizard(investigation_id):
             investigation_id
         ))
 
+        action = request.form.get("action", "generate_final")
+        if action == "save_draft":
+            conn.commit(); conn.close()
+            flash("Draft saved. No investigation credit was used.", "success")
+            return redirect(url_for("investigation_wizard", investigation_id=investigation_id))
+
+        ok, credit_source = consume_completed_investigation_credit(conn, g.user["company_id"], g.user["id"], investigation_id)
+        if not ok:
+            conn.rollback(); conn.close()
+            flash("You are out of investigation credits. Buy more credits or upgrade your plan.", "warning")
+            return redirect(url_for("billing"))
+
         weather_data = None
 
         if get_weather_summary and fields["property_address"]:
@@ -527,9 +850,13 @@ def investigation_wizard(investigation_id):
             investigation_id
         ))
 
+        version_number = conn.execute("SELECT COALESCE(MAX(version_number), 0) + 1 AS v FROM investigation_versions WHERE investigation_id=?", (investigation_id,)).fetchone()["v"]
+        conn.execute("INSERT INTO investigation_versions (investigation_id, version_number, generated_by_user_id, credit_used, ai_snapshot_json) VALUES (?, ?, ?, 1, ?)", (investigation_id, version_number, g.user["id"], json.dumps(diagnosis)))
+        conn.execute("UPDATE investigations SET completed_ai_count=COALESCE(completed_ai_count,0)+1, last_completed_ai_at=CURRENT_TIMESTAMP WHERE id=?", (investigation_id,))
         conn.commit()
         conn.close()
 
+        flash(f"Final AI investigation generated. 1 {credit_source} credit used.", "success")
         return redirect(url_for("results", investigation_id=investigation_id))
 
     investigation = conn.execute(
@@ -547,14 +874,12 @@ def investigation_wizard(investigation_id):
 
 
 @app.route("/results/<int:investigation_id>")
+@login_required
 def results(investigation_id):
     init_db()
     conn = get_db()
 
-    investigation = conn.execute(
-        "SELECT * FROM investigations WHERE id=?",
-        (investigation_id,)
-    ).fetchone()
+    investigation = case_access(conn, investigation_id)
 
     if investigation is None:
         conn.close()
@@ -599,6 +924,7 @@ def results(investigation_id):
 
 
 @app.route("/feedback/<int:investigation_id>", methods=["POST"])
+@login_required
 def feedback(investigation_id):
     init_db()
     conn = get_db()
@@ -625,6 +951,7 @@ def feedback(investigation_id):
 
 
 @app.route("/locator/<int:investigation_id>")
+@login_required
 def locator(investigation_id):
     init_db()
     conn = get_db()
@@ -644,6 +971,7 @@ def locator(investigation_id):
 
 
 @app.route("/api/save-interior-point/<int:investigation_id>", methods=["POST"])
+@login_required
 def save_interior_point(investigation_id):
     init_db()
     data = request.get_json(silent=True) or {}
@@ -671,6 +999,7 @@ def save_interior_point(investigation_id):
 
 
 @app.route("/api/save-roof-point/<int:investigation_id>", methods=["POST"])
+@login_required
 def save_roof_point(investigation_id):
     init_db()
     data = request.get_json(silent=True) or {}
@@ -698,6 +1027,7 @@ def save_roof_point(investigation_id):
 
 
 @app.route("/api/save-calibration-point/<int:investigation_id>", methods=["POST"])
+@login_required
 def save_calibration_point(investigation_id):
     init_db()
     data = request.get_json(silent=True) or {}
@@ -937,6 +1267,7 @@ def make_pdf_report(investigation, photos, feedback=None, report_type="professio
 
 
 @app.route("/report/<int:investigation_id>/pdf")
+@login_required
 def pdf_report(investigation_id):
     init_db()
     investigation, photos, feedback = get_case_bundle(investigation_id)
@@ -950,6 +1281,7 @@ def pdf_report(investigation_id):
 
 
 @app.route("/report/<int:investigation_id>/insurance-pdf")
+@login_required
 def insurance_pdf_report(investigation_id):
     init_db()
     investigation, photos, feedback = get_case_bundle(investigation_id)
@@ -963,6 +1295,7 @@ def insurance_pdf_report(investigation_id):
 
 
 @app.route("/case/<int:investigation_id>/update", methods=["POST"])
+@login_required
 def update_case(investigation_id):
     init_db()
     update_fields = [
@@ -976,7 +1309,9 @@ def update_case(investigation_id):
     assignments = ", ".join([f"{field}=?" for field in update_fields])
 
     conn = get_db()
-    conn.execute(f"UPDATE investigations SET {assignments} WHERE id=?", values + [investigation_id])
+    if case_access(conn, investigation_id) is None:
+        conn.close(); flash("Case not found or access denied.", "warning"); return redirect(url_for("admin_cases"))
+    conn.execute(f"UPDATE investigations SET {assignments} WHERE id=? AND company_id=?", values + [investigation_id, g.user["company_id"]])
     conn.commit()
     conn.close()
 
@@ -985,12 +1320,19 @@ def update_case(investigation_id):
 
 
 @app.route("/admin/cases")
+@login_required
 def admin_cases():
     init_db()
     conn = get_db()
 
     where_sql, params, filters = build_case_filters(request.args)
 
+    if where_sql:
+        where_sql = where_sql + " AND company_id=?"
+        params = params + [g.user["company_id"]]
+    else:
+        where_sql = " WHERE company_id=?"
+        params = [g.user["company_id"]]
     cases = conn.execute(
         f"SELECT * FROM investigations {where_sql} ORDER BY created_at DESC",
         params
@@ -1004,14 +1346,16 @@ def admin_cases():
             SUM(CASE WHEN COALESCE(status, 'New') = 'Closed' THEN 1 ELSE 0 END) AS closed_cases,
             AVG(CASE WHEN ai_confidence IS NOT NULL THEN ai_confidence END) AS avg_confidence
         FROM investigations
-    """).fetchone()
+        WHERE company_id=?
+    """, (g.user["company_id"],)).fetchone()
 
     status_counts = conn.execute("""
         SELECT COALESCE(status, 'New') AS status, COUNT(*) AS count
         FROM investigations
+        WHERE company_id=?
         GROUP BY COALESCE(status, 'New')
         ORDER BY count DESC
-    """).fetchall()
+    """, (g.user["company_id"],)).fetchall()
 
     conn.close()
 
@@ -1022,6 +1366,56 @@ def admin_cases():
         status_counts=status_counts,
         filters=filters
     )
+
+
+@app.route('/crm/estimates')
+@login_required
+def crm_estimates():
+    conn = get_db()
+    estimates = conn.execute('SELECT * FROM repair_estimates WHERE company_id=? ORDER BY created_at DESC', (g.user['company_id'],)).fetchall()
+    conn.close()
+    return render_template('crm_estimates.html', estimates=estimates)
+
+@app.route('/crm/estimates/new', methods=['GET', 'POST'])
+@app.route('/crm/estimates/new/<int:investigation_id>', methods=['GET', 'POST'])
+@login_required
+def crm_estimate_new(investigation_id=None):
+    conn = get_db()
+    investigation = case_access(conn, investigation_id) if investigation_id else None
+    if request.method == 'POST':
+        estimate_type = request.form.get('estimate_type') or 'repair'
+        roof_zip = request.form.get('roof_zip') or ''
+        roof_squares = float(request.form.get('roof_squares') or 0)
+        material_tier = request.form.get('material_tier') or 'standard'
+        base_by_tier = {'economy': 115, 'standard': 145, 'premium': 190, 'metal': 260}
+        zip_factor = 1.0
+        if roof_zip.startswith(('30','31','32')): zip_factor = 0.96
+        elif roof_zip.startswith(('33','34')): zip_factor = 1.12
+        elif roof_zip.startswith(('90','91','92','93','94')): zip_factor = 1.25
+        material_per_square = base_by_tier.get(material_tier, 145) * zip_factor
+        labor_rate = float(request.form.get('labor_rate') or 85)
+        labor_hours = float(request.form.get('labor_hours') or max(roof_squares * (6 if estimate_type == 'new_roof' else 2.5), 1))
+        material_cost = roof_squares * material_per_square
+        labor_cost = labor_hours * labor_rate
+        overhead_profit = (material_cost + labor_cost) * 0.20
+        total_cost = material_cost + labor_cost + overhead_profit
+        cur = conn.execute('\n            INSERT INTO repair_estimates\n            (company_id, investigation_id, customer_name, property_address, estimate_type, roof_zip, roof_squares, material_tier, labor_rate, material_cost, labor_cost, overhead_profit, total_cost, notes)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ', (g.user['company_id'], investigation_id, request.form.get('customer_name'), request.form.get('property_address'), estimate_type, roof_zip, roof_squares, material_tier, labor_rate, material_cost, labor_cost, overhead_profit, total_cost, request.form.get('notes')))
+        conn.commit(); estimate_id = cur.lastrowid; conn.close()
+        flash('CRM estimate created for owner review.', 'success')
+        return redirect(url_for('crm_estimate_print', estimate_id=estimate_id))
+    conn.close()
+    return render_template('crm_estimate_form.html', investigation=investigation)
+
+@app.route('/crm/estimates/<int:estimate_id>/print')
+@login_required
+def crm_estimate_print(estimate_id):
+    conn = get_db()
+    estimate = conn.execute('SELECT * FROM repair_estimates WHERE id=? AND company_id=?', (estimate_id, g.user['company_id'])).fetchone()
+    conn.close()
+    if estimate is None:
+        flash('Estimate not found.', 'warning')
+        return redirect(url_for('crm_estimates'))
+    return render_template('crm_estimate_print.html', estimate=estimate)
 
 
 if __name__ == "__main__":

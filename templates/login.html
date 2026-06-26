@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-shell">
+  <div class="panel auth-card">
+    <div class="eyebrow">Secure Access</div>
+    <h1>Login to LeakTrace</h1>
+    <form method="post">
+      <label>Email <input name="email" type="email" required></label>
+      <label>Password <input name="password" type="password" required></label>
+      <button class="primary-btn" type="submit">Login</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

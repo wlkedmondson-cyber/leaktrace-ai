@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+  <div class="case-header"><div><div class="eyebrow">CRM Add-On</div><h1>Owner Review Estimates</h1><p class="muted">Create repair or roof replacement estimates for review before final job pricing.</p></div><a class="primary-btn" href="{{ url_for('crm_estimate_new') }}">New Estimate</a></div>
+  <div class="panel table-panel"><table><thead><tr><th>ID</th><th>Customer</th><th>Type</th><th>ZIP</th><th>Total</th><th>Status</th><th>Created</th></tr></thead><tbody>{% for e in estimates %}<tr><td><a href="{{ url_for('crm_estimate_print', estimate_id=e.id) }}">#{{ e.id }}</a></td><td>{{ e.customer_name or '-' }}</td><td>{{ e.estimate_type }}</td><td>{{ e.roof_zip }}</td><td>${{ '%.2f'|format(e.total_cost or 0) }}</td><td>{{ e.status }}</td><td>{{ e.created_at }}</td></tr>{% else %}<tr><td colspan="7">No estimates yet.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+  <div class="case-header"><div><div class="eyebrow">Billing</div><h1>Plans & Investigation Credits</h1><p class="muted">Billable event: one completed AI investigation. Drafts, photo uploads, edits, and PDF downloads do not use credits.</p></div></div>
+  <div class="metric-grid">
+    <div class="metric-card"><span>Current Plan</span><strong>{{ summary.plan.name }}</strong></div>
+    <div class="metric-card"><span>Monthly Used</span><strong>{% if summary.included is none %}{{ summary.used }} / Unlimited{% else %}{{ summary.used }} / {{ summary.included }}{% endif %}</strong></div>
+    <div class="metric-card"><span>Purchased Credits</span><strong>{{ summary.purchased_remaining }}</strong></div>
+    <div class="metric-card"><span>Users</span><strong>{% if summary.plan.max_users is none %}{{ summary.active_users }} / Unlimited{% else %}{{ summary.active_users }} / {{ summary.plan.max_users }}{% endif %}</strong></div>
+  </div>
+  <div class="plan-grid">
+    {% for code, plan in plans.items() %}
+    <form method="post" class="panel plan-card">
+      <h2>{{ plan.name }}</h2>
+      <p class="price">${{ plan.price }}/mo</p>
+      <p>Users: <strong>{% if plan.max_users is none %}Unlimited{% else %}{{ plan.max_users }}{% endif %}</strong></p>
+      <p>Investigations: <strong>{% if plan.monthly_credits is none %}Unlimited fair use{% else %}{{ plan.monthly_credits }}/month{% endif %}</strong></p>
+      <input type="hidden" name="plan_code" value="{{ code }}">
+      <button class="primary-btn" type="submit">Use {{ plan.name }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  <div class="panel"><h2>Buy More Investigation Credits</h2><div class="plan-grid small">
+    {% for code, pack in credit_packs.items() %}
+    <form method="post" action="{{ url_for('buy_credits') }}" class="credit-card"><input type="hidden" name="pack_code" value="{{ code }}"><strong>{{ pack.credits }} Credits</strong><span>${{ pack.price }}</span><button class="secondary-btn" type="submit">Add Pack</button></form>
+    {% endfor %}
+  </div><p class="muted">Manual mode adds credits immediately. The Stripe Checkout hook uses the same table and can be turned on next.</p></div>
+</section>
+{% endblock %}

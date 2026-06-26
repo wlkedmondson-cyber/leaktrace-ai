@@ -263,7 +263,14 @@
             </div>
         </div>
 
-        <button class="primary-btn" type="submit">Run Water Intrusion Analysis</button>
+        <div class="panel credit-confirm">
+            <h2>Finalize Investigation</h2>
+            <p class="muted">Saving a draft does not use a credit. Generating the final AI investigation uses 1 investigation credit.</p>
+            <div class="action-row">
+                <button class="secondary-btn" type="submit" name="action" value="save_draft">Save Draft — No Credit Used</button>
+                <button class="primary-btn" type="submit" name="action" value="generate_final" onclick="return confirm('Generate final AI investigation? This will use 1 investigation credit.');">Generate Final AI Investigation — Use 1 Credit</button>
+            </div>
+        </div>
     </form>
 </section>
 {% endblock %}

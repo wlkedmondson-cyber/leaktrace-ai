@@ -13,8 +13,17 @@
         <span>LeakTrace AI</span>
     </a>
     <nav>
+        {% if g.user %}
+        <a href="{{ url_for('company_dashboard') }}">Dashboard</a>
         <a href="/">New Case</a>
-        <a href="/admin/cases">Case Dashboard</a>
+        <a href="/admin/cases">Cases</a>
+        <a href="{{ url_for('crm_estimates') }}">CRM Estimates</a>
+        <a href="{{ url_for('billing') }}">Billing</a>
+        <a href="{{ url_for('team') }}">Team</a>
+        <a href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+        <a href="{{ url_for('login') }}">Login</a>
+        {% endif %}
     </nav>
 </header>
 

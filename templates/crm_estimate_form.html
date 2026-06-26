@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="results-shell">
+  <div class="case-header"><div><div class="eyebrow">CRM Estimate</div><h1>Create Estimate</h1><p class="muted">ZIP is used for a local pricing factor now. A supplier/material pricing API can replace that calculation later.</p></div></div>
+  <form method="post" class="panel investigation-form">
+    <div class="grid-2">
+      <label>Customer Name<input name="customer_name" value="{{ investigation.customer_name if investigation else '' }}"></label>
+      <label>Property Address<input name="property_address" value="{{ investigation.property_address if investigation else '' }}"></label>
+      <label>Estimate Type<select name="estimate_type"><option value="repair">Repair</option><option value="new_roof">New Roof</option></select></label>
+      <label>ZIP Code<input name="roof_zip" placeholder="31602"></label>
+      <label>Roof Squares<input name="roof_squares" type="number" step="0.1" placeholder="25"></label>
+      <label>Material Tier<select name="material_tier"><option value="economy">Economy shingle</option><option value="standard" selected>Standard shingle</option><option value="premium">Premium shingle</option><option value="metal">Metal</option></select></label>
+      <label>Labor Rate<input name="labor_rate" type="number" step="0.01" value="85"></label>
+      <label>Labor Hours<input name="labor_hours" type="number" step="0.1" placeholder="Optional override"></label>
+    </div>
+    <label>Notes<textarea name="notes" rows="4" placeholder="Scope assumptions, exclusions, access issues, decking not included, etc."></textarea></label>
+    <button class="primary-btn" type="submit">Create Review Estimate</button>
+  </form>
+</section>
+{% endblock %}

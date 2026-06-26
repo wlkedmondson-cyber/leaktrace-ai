@@ -28,9 +28,14 @@
                href="{{ url_for('insurance_pdf_report', investigation_id=investigation.id) }}">
                 Insurance PDF
             </a>
+
+            <a class="secondary-btn"
+               href="{{ url_for('crm_estimate_new', investigation_id=investigation.id) }}">
+                Create CRM Estimate
+            </a>
         </div>
 
-        <p>{{ investigation.mode|title }} Mode · {{ investigation.status or 'New' }} · {{ investigation.priority or 'Normal' }} Priority</p>
+        <p>{{ investigation.mode|title }} Mode · {{ investigation.status or 'New' }} · {{ investigation.priority or 'Normal' }} Priority · Completed AI Versions: {{ investigation.completed_ai_count or 0 }}</p>
     </div>
 
     <div class="confidence-ring">
